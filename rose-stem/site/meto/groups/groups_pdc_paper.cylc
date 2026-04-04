@@ -14,98 +14,92 @@
 {# Individual paper test case groups                                       #}
 {# ====================================================================== #}
 
+{# 7.1 Dry Baroclinic Wave — baseline validation of Part II core           #}
+{# Uses: gungho_model + C48_MG + pdc_dry_baroclinic                        #}
 {% do site_groups.update({
-
-    {# ----------------------------------------------------------------------- #}
-    {# 7.1 Dry Baroclinic Wave — baseline validation of Part II core           #}
-    {# Uses: gungho_model + C48_MG + pdc_dry_baroclinic                        #}
-    {# Existing config: rose-app-baroclinic.conf can also be used              #}
-    {# ----------------------------------------------------------------------- #}
     "pdc_paper_dry_baroclinic": [
         "gungho_model_pdc_dry_baroclinic-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.2 Moist Baroclinic Wave — moisture formulation, moist EOS             #}
-    {# Uses: gungho_model + C48_MG + pdc_moist_baroclinic                      #}
-    {# Mechanisms: C (inter-space), E (SI coupling), F (moisture)              #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.2 Moist Baroclinic Wave — moisture formulation, moist EOS             #}
+{# Uses: gungho_model + C48_MG + pdc_moist_baroclinic                      #}
+{# Mechanisms: C (inter-space), E (SI coupling), F (moisture)              #}
+{% do site_groups.update({
     "pdc_paper_moist_baroclinic": [
         "gungho_model_pdc_moist_baroclinic-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.3 Held-Suarez — idealised physics tendency coupling                   #}
-    {# Uses: gungho_model + C48_MG + pdc_held_suarez                           #}
-    {# Mechanisms: A (DOF injection), E (SI coupling)                          #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.3 Held-Suarez — idealised physics tendency coupling                   #}
+{# Uses: gungho_model + C48_MG + pdc_held_suarez                           #}
+{# Mechanisms: A (DOF injection), E (SI coupling)                          #}
+{% do site_groups.update({
     "pdc_paper_held_suarez": [
         "gungho_model_pdc_held_suarez-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.4 Moist Held-Suarez — variable heat capacity, moisture transport      #}
-    {# Uses: gungho_model + C48_MG + pdc_moist_held_suarez                     #}
-    {# Mechanisms: A, C, E, F                                                  #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.4 Moist Held-Suarez — variable heat capacity, moisture transport      #}
+{# Uses: gungho_model + C48_MG + pdc_moist_held_suarez                     #}
+{# Mechanisms: A, C, E, F                                                  #}
+{% do site_groups.update({
     "pdc_paper_moist_held_suarez": [
         "gungho_model_pdc_moist_held_suarez-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.5a SCM BOMEX Boundary Layer — full physics single-column              #}
-    {# Uses: lfric_atm + BiP2x2-50000x50000 + bomex (existing config)         #}
-    {# Mechanisms: A, B (segmentation), C, D (H-div velocity), E              #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.5a SCM BOMEX Boundary Layer — full physics single-column              #}
+{# Uses: lfric_atm + BiP2x2-50000x50000 + bomex (existing config)         #}
+{# Mechanisms: A, B (segmentation), C, D (H-div velocity), E              #}
+{% do site_groups.update({
     "pdc_paper_scm_bomex": [
         "lfric_atm_scm_gal9_bomex-BiP2x2-50000x50000_azspice_gnu_fast-debug-32bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.5b SCM Dry CBL — dry convective boundary layer                        #}
-    {# Uses: lfric_atm + BiP2x2-50000x50000 + cbl_dry (existing config)       #}
-    {# Mechanisms: A, B, D, E                                                  #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.5b SCM Dry CBL — dry convective boundary layer                        #}
+{# Uses: lfric_atm + BiP2x2-50000x50000 + cbl_dry (existing config)       #}
+{# Mechanisms: A, B, D, E                                                  #}
+{% do site_groups.update({
     "pdc_paper_scm_cbl_dry": [
         "lfric_atm_scm_gal9_cbl_dry-BiP2x2-50000x50000_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.6 Idealised Tropical Cyclone (DCMIP-2016 Case 5)                     #}
-    {# Uses: gungho_model + C48_MG + pdc_tropical_cyclone                      #}
-    {# Mechanisms: ALL (A, B, C, D, E, F)                                      #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.6 Idealised Tropical Cyclone (DCMIP-2016 Case 5)                     #}
+{# Uses: gungho_model + C48_MG + pdc_tropical_cyclone                      #}
+{# Mechanisms: ALL (A, B, C, D, E, F)                                      #}
+{% do site_groups.update({
     "pdc_paper_tropical_cyclone": [
         "gungho_model_pdc_tropical_cyclone-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# 7.7 Gravity Wave Response to Localised Heating                          #}
-    {# Uses: gungho_model + C48_MG + pdc_gravity_wave_heating                  #}
-    {# Mechanisms: A, E                                                        #}
-    {# ----------------------------------------------------------------------- #}
+{# 7.7 Gravity Wave Response to Localised Heating                          #}
+{# Uses: gungho_model + C48_MG + pdc_gravity_wave_heating                  #}
+{# Mechanisms: A, E                                                        #}
+{% do site_groups.update({
     "pdc_paper_gravity_wave_heating": [
         "gungho_model_pdc_gravity_wave_heating-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
+    }) %}
 
-    {# ----------------------------------------------------------------------- #}
-    {# Resolution sensitivity tests at C96 for key cases                       #}
-    {# ----------------------------------------------------------------------- #}
+{# Resolution sensitivity at C96 for key cases                             #}
+{% do site_groups.update({
     "pdc_paper_hires": [
         "gungho_model_pdc_dry_baroclinic-C96_MG_azspice_gnu_fast-debug-64bit",
         "gungho_model_pdc_moist_baroclinic-C96_MG_azspice_gnu_fast-debug-64bit",
         "gungho_model_pdc_held_suarez-C96_MG_azspice_gnu_fast-debug-64bit",
     ],
-
     }) %}
 
 {# ====================================================================== #}
 {# Composite groups                                                        #}
 {# ====================================================================== #}
 
+{# All gungho_model paper tests #}
 {% do site_groups.update({
-
-    {# All gungho_model paper tests #}
     "pdc_paper_gungho": [
         "pdc_paper_dry_baroclinic",
         "pdc_paper_moist_baroclinic",
@@ -114,25 +108,30 @@
         "pdc_paper_tropical_cyclone",
         "pdc_paper_gravity_wave_heating",
     ],
+    }) %}
 
-    {# All lfric_atm paper tests #}
+{# All lfric_atm paper tests #}
+{% do site_groups.update({
     "pdc_paper_lfric_atm": [
         "pdc_paper_scm_bomex",
         "pdc_paper_scm_cbl_dry",
     ],
+    }) %}
 
-    {# Full paper test suite — the main entry point #}
+{# Full paper test suite — main entry point #}
+{% do site_groups.update({
     "pdc_paper": [
         "pdc_paper_gungho",
         "pdc_paper_lfric_atm",
     ],
+    }) %}
 
-    {# Extended suite including resolution sensitivity #}
+{# Extended suite including resolution sensitivity #}
+{% do site_groups.update({
     "pdc_paper_full": [
         "pdc_paper",
         "pdc_paper_hires",
     ],
-
     }) %}
 
 {# Extend the azspice group so paper tests are discoverable #}
