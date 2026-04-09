@@ -75,7 +75,7 @@ contains
     type( field_type ), pointer     :: dx_at_w2 => null()
     type( field_type ), pointer     :: panel_id => null()
 
-    integer(kind=i_def) :: k, levelupper, n, n_iter_sor
+    integer(kind=i_def) :: k, levelupper, n
     real(kind=r_def)    :: omega_sor
 
     logical :: pmsl_flag, pmsl_unsmooth_flag
@@ -143,27 +143,28 @@ contains
         ! -------------------------------------------------------
         ! SOR (Successive Over-Relaxation) solver
         ! -------------------------------------------------------
-        ! Compute optimal SOR relaxation parameter omega if not set by namelist.
-        ! Optimal value for 2D Poisson on N x N grid:  omega_opt = 2/(1+sin(pi/(N+1)))
-        ! n_iter_pmsl = cells_per_side for both global and regional models.
+        ! IMPORTANT: The kernel uses a PARALLEL (all-cells-at-once) update, which
+        ! is equivalent to Jacobi overrelaxation, NOT sequential SOR. For parallel
+        ! Jacobi overrelaxation, the stability limit is omega < 2/(1+rho_J) where
+        ! rho_J = cos(pi/(N+1)) is the Jacobi spectral radius. For N >= 12 this
+        ! limit is barely above 1.0, so omega MUST be <= 1.0 for stability.
+        ! The well-known formula omega_opt = 2/(1+sin(pi/(N+1))) applies only to
+        ! SEQUENTIAL SOR (red-black or cell-by-cell sweep). To obtain the full SOR
+        ! speedup with omega > 1, a red-black (two-colour) kernel implementation is
+        ! needed (future work).
+        !
+        ! With omega < 1 the scheme is underrelaxed Jacobi (stable, slower).
+        ! With omega = 1 it is identical to standard Jacobi.
         if (pmsl_omega <= 0.0_r_def) then
-          omega_sor = 2.0_r_def / (1.0_r_def + sin(PI / real(n_iter_pmsl + 1, r_def)))
+          ! Default: standard Jacobi (omega=1); SOR speedup requires red-black
+          omega_sor = 1.0_r_def
         else
           omega_sor = pmsl_omega
         end if
 
-        ! Estimate equivalent number of Jacobi iterations for logging only.
-        ! This is a theoretical estimate based on the optimal omega eigenvalue
-        ! analysis for a uniform 2D Poisson problem - actual performance should
-        ! be confirmed by timing tests (see branch bshipway/vn3.1_pmsl_solver).
-        n_iter_sor = max(2_i_def, ceiling( real(n_iter_pmsl, r_def) * &
-                         (1.0_r_def - sin(PI / real(n_iter_pmsl + 1, r_def))) / &
-                          cos(PI / real(n_iter_pmsl + 1, r_def)) ))
-
-        write(log_scratch_space, '(A,I4,A,F7.4,A,I4)') &
+        write(log_scratch_space, '(A,I4,A,F7.4)') &
           'PMSL SOR solver: n_iter=', n_iter_pmsl, &
-          '  omega=', omega_sor, &
-          '  est. Jacobi equiv.=', n_iter_sor
+          '  omega=', omega_sor
         call log_event(log_scratch_space, LOG_LEVEL_INFO)
 
         do n = 1, n_iter_pmsl
