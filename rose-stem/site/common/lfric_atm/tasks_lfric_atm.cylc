@@ -23,6 +23,58 @@
         "plot_str": "plot_map.py $NODAL_DATA_DIR/lfric_diagnostics.nc  $PLOT_DIR",
     }) %}
 
+{% elif task_ns.conf_name == "nwp_gal9_pmsl_jacobi-C48_MG" %}
+{# PMSL solver comparison: Jacobi baseline at C48 with full oper diagnostics #}
+
+    {% do task_dict.update({
+        "opt_confs": ["um_dump","oper_diags","pmsl_jacobi"],
+        "resolution": "C48_MG",
+        "DT": 1800,
+        "tsteps": 36,
+        "mpi_parts": 24,
+        "kgo_checks": [],
+        "plot_str": "plot_map.py $NODAL_DATA_DIR/lfric_diagnostics.nc  $PLOT_DIR",
+    }) %}
+
+{% elif task_ns.conf_name == "nwp_gal9_pmsl_sor-C48_MG" %}
+{# PMSL solver comparison: SOR solver at C48 with full oper diagnostics #}
+
+    {% do task_dict.update({
+        "opt_confs": ["um_dump","oper_diags","pmsl_sor"],
+        "resolution": "C48_MG",
+        "DT": 1800,
+        "tsteps": 36,
+        "mpi_parts": 24,
+        "kgo_checks": [],
+        "plot_str": "plot_map.py $NODAL_DATA_DIR/lfric_diagnostics.nc  $PLOT_DIR",
+    }) %}
+
+{% elif task_ns.conf_name == "nwp_gal9_pmsl_jacobi-C12" %}
+{# PMSL solver comparison: Jacobi baseline at C12 for quick development testing #}
+
+    {% do task_dict.update({
+        "opt_confs": ["um_dump","oper_diags","pmsl_jacobi"],
+        "resolution": "C12",
+        "DT": 1800,
+        "tsteps": 48,
+        "mpi_parts": 6,
+        "kgo_checks": [],
+        "plot_str": "plot_map.py $NODAL_DATA_DIR/lfric_diagnostics.nc  $PLOT_DIR",
+    }) %}
+
+{% elif task_ns.conf_name == "nwp_gal9_pmsl_sor-C12" %}
+{# PMSL solver comparison: SOR solver at C12 for quick development testing #}
+
+    {% do task_dict.update({
+        "opt_confs": ["um_dump","oper_diags","pmsl_sor"],
+        "resolution": "C12",
+        "DT": 1800,
+        "tsteps": 48,
+        "mpi_parts": 6,
+        "kgo_checks": [],
+        "plot_str": "plot_map.py $NODAL_DATA_DIR/lfric_diagnostics.nc  $PLOT_DIR",
+    }) %}
+
 {% elif task_ns.conf_name == "nwp_gal9-C48_MG" %}
 
     {% do task_dict.update({
@@ -256,6 +308,38 @@
         "wallclock": 10,
         "xios_nodes": 4,
         "mpi_parts_xios" : 16,
+    }) %}
+
+{% elif task_ns.conf_name == "nwp_gal9_pmsl_jacobi-C224_MG" %}
+{# PMSL solver comparison: Jacobi baseline at C224 - target production resolution #}
+{# Run on EX1 HPC only #}
+
+    {% do task_dict.update({
+        "opt_confs": ["um_dump","june_case","oper_diags","pmsl_jacobi"],
+        "resolution": "C224_MG",
+        "DT": 720,
+        "tsteps": 60,
+        "mpi_parts": 588,
+        "xios_nodes": 1,
+        "mpi_parts_xios": 64,
+        "kgo_checks": [],
+        "log_level": "info",
+    }) %}
+
+{% elif task_ns.conf_name == "nwp_gal9_pmsl_sor-C224_MG" %}
+{# PMSL solver comparison: SOR solver at C224 - target production resolution #}
+{# Run on EX1 HPC only #}
+
+    {% do task_dict.update({
+        "opt_confs": ["um_dump","june_case","oper_diags","pmsl_sor"],
+        "resolution": "C224_MG",
+        "DT": 720,
+        "tsteps": 60,
+        "mpi_parts": 588,
+        "xios_nodes": 1,
+        "mpi_parts_xios": 64,
+        "kgo_checks": [],
+        "log_level": "info",
     }) %}
 
 {% elif task_ns.conf_name == "nwp_gal9-C896_MG" %}

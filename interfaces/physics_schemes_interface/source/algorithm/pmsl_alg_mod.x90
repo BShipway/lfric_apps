@@ -12,7 +12,7 @@ module pmsl_alg_mod
   use io_config_mod,           only: write_diag, use_xios_io
   use timing_mod,              only: start_timing, stop_timing, tik, LPROF
   use extrusion_config_mod,    only: number_of_layers, domain_height
-  use constants_mod,           only: r_def, i_def
+  use constants_mod,           only: r_def, i_def, PI
   use level_heights_mod,       only: eta_theta_levels
   use sci_geometric_constants_mod,   &
                                only: get_height_fv, get_panel_id, get_dx_at_w2
@@ -23,9 +23,15 @@ module pmsl_alg_mod
   use planet_constants_mod, only: recip_kappa_def
   use planet_config_mod, only: p_zero
   use um_domain_init_mod, only: n_iter_pmsl
+  use physics_config_mod, only: pmsl_solver, pmsl_omega
+  use log_mod,            only: log_event, log_scratch_space, LOG_LEVEL_INFO
 
   implicit none
   private
+
+  !> Solver type identifiers matched to rose-meta values
+  character(len=6), parameter :: pmsl_solver_jacobi = 'jacobi'
+  character(len=3), parameter :: pmsl_solver_sor    = 'sor'
 
   public :: pmsl_alg
 
@@ -49,6 +55,7 @@ contains
     use pmsl_fgeo_kernel_mod, only: pmsl_fgeo_kernel_type
     use pmsl_ffunc_kernel_mod, only: pmsl_ffunc_kernel_type
     use pmsl_solve_kernel_mod, only: pmsl_solve_kernel_type
+    use pmsl_sor_kernel_mod, only: pmsl_sor_kernel_type
 
     implicit none
 
@@ -71,7 +78,8 @@ contains
     type( field_type ), pointer     :: dx_at_w2 => null()
     type( field_type ), pointer     :: panel_id => null()
 
-    integer(kind=i_def) :: k, levelupper, n
+    integer(kind=i_def) :: k, levelupper, n, n_iter_sor
+    real(kind=r_def)    :: omega_sor
 
     logical :: pmsl_flag, pmsl_unsmooth_flag
 
@@ -134,14 +142,53 @@ contains
                                          f_ug, sten_size, panel_id, sten_size, &
                                          f_func) )
 
-      do n = 1, n_iter_pmsl
-        ! Solve for new PMSL value
-        call invoke(pmsl_solve_kernel_type(dx_at_w2, f_func, exner_m, &
-                                           sten_size, height_wth, exner_sm) )
+      if (pmsl_solver == pmsl_solver_sor) then
+        ! -------------------------------------------------------
+        ! SOR (Successive Over-Relaxation) solver
+        ! -------------------------------------------------------
+        ! Compute optimal SOR relaxation parameter omega if not set by namelist.
+        ! Optimal value for 2D Poisson on N x N grid:  omega_opt = 2/(1+sin(pi/(N+1)))
+        ! n_iter_pmsl = cells_per_side for both global and regional models.
+        if (pmsl_omega <= 0.0_r_def) then
+          omega_sor = 2.0_r_def / (1.0_r_def + sin(PI / real(n_iter_pmsl + 1, r_def)))
+        else
+          omega_sor = pmsl_omega
+        end if
 
-        ! Set old value to new value
-        call invoke(setval_X(exner_m, exner_sm))
-      end do
+        ! Estimate equivalent number of Jacobi iterations (for logging only):
+        ! rho = cos(pi/(N+1)), SOR speedup factor ~ (1+rho)/(1-rho) for optimal omega
+        n_iter_sor = max(2_i_def, ceiling( real(n_iter_pmsl, r_def) * &
+                         (1.0_r_def - sin(PI / real(n_iter_pmsl + 1, r_def))) / &
+                          cos(PI / real(n_iter_pmsl + 1, r_def)) ))
+
+        write(log_scratch_space, '(A,I4,A,F7.4,A,I4)') &
+          'PMSL SOR solver: n_iter=', n_iter_pmsl, &
+          '  omega=', omega_sor, &
+          '  est. Jacobi equiv.=', n_iter_sor
+        call log_event(log_scratch_space, LOG_LEVEL_INFO)
+
+        do n = 1, n_iter_pmsl
+          ! SOR iterate: exner_out = (1-omega)*exner_in + omega*Jacobi(exner_in)
+          call invoke(pmsl_sor_kernel_type(dx_at_w2, f_func, exner_m, &
+                                          sten_size, height_wth, exner_sm, &
+                                          omega_sor) )
+          ! Set old value to new value
+          call invoke(setval_X(exner_m, exner_sm))
+        end do
+
+      else
+        ! -------------------------------------------------------
+        ! Default: Jacobi relaxation (pmsl_solver='jacobi')
+        ! -------------------------------------------------------
+        do n = 1, n_iter_pmsl
+          ! Solve for new PMSL value
+          call invoke(pmsl_solve_kernel_type(dx_at_w2, f_func, exner_m, &
+                                             sten_size, height_wth, exner_sm) )
+          ! Set old value to new value
+          call invoke(setval_X(exner_m, exner_sm))
+        end do
+
+      end if
 
       ! Convert exner to PMSL
       call invoke(inc_X_powreal_a(exner_m, recip_kappa_def), &
@@ -157,3 +204,4 @@ contains
   end subroutine pmsl_alg
 
 end module pmsl_alg_mod
+
