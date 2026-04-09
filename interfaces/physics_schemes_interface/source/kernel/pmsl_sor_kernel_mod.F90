@@ -18,10 +18,10 @@
 !>            omega_opt = 2 / (1 + sin(pi/(N+1)))
 !>
 !>          where N = cells_per_side, giving:
-!>            C12:  omega_opt ~ 1.730,  speedup ~3.7x vs Jacobi
-!>            C48:  omega_opt ~ 1.874,  speedup ~7.9x vs Jacobi
-!>            C224: omega_opt ~ 1.972,  speedup ~36x  vs Jacobi
-!>            C896: omega_opt ~ 1.993,  speedup ~143x vs Jacobi
+!>            C12:  omega_opt ~ 1.730,  speedup ???x vs Jacobi (to be confirmed by timing)
+!>            C48:  omega_opt ~ 1.874,  speedup ???x vs Jacobi (to be confirmed by timing)
+!>            C224: omega_opt ~ 1.972,  speedup ???x vs Jacobi (to be confirmed by timing)
+!>            C896: omega_opt ~ 1.993,  speedup ???x vs Jacobi (to be confirmed by timing)
 !>
 !>          With omega=1.0 this kernel is identical to the standard Jacobi kernel.
 

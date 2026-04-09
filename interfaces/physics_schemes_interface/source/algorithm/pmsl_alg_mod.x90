@@ -155,8 +155,10 @@ contains
           omega_sor = pmsl_omega
         end if
 
-        ! Estimate equivalent number of Jacobi iterations (for logging only):
-        ! rho = cos(pi/(N+1)), SOR speedup factor ~ (1+rho)/(1-rho) for optimal omega
+        ! Estimate equivalent number of Jacobi iterations for logging only.
+        ! This is a theoretical estimate based on the optimal omega eigenvalue
+        ! analysis for a uniform 2D Poisson problem - actual performance should
+        ! be confirmed by timing tests (see branch bshipway/vn3.1_pmsl_solver).
         n_iter_sor = max(2_i_def, ceiling( real(n_iter_pmsl, r_def) * &
                          (1.0_r_def - sin(PI / real(n_iter_pmsl + 1, r_def))) / &
                           cos(PI / real(n_iter_pmsl + 1, r_def)) ))
