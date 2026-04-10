@@ -17,6 +17,7 @@
         "lfric_atm_nwp_gal9_short-C12_azspice_gnu_fast-debug-32bit",
         "lfric_atm_nwp_gal9_pmsl_jacobi-C12_azspice_gnu_fast-debug-64bit",
         "lfric_atm_nwp_gal9_pmsl_sor-C12_azspice_gnu_fast-debug-64bit",
+        "lfric_atm_nwp_gal9_pmsl_chebyshev-C12_azspice_gnu_fast-debug-64bit",
     ],
     "lfric_atm_nwp_azspice_extra": [
         "lfric_atm_nwp_gal9-C48_MG_azspice_gnu_fast-debug-32bit",
@@ -32,6 +33,7 @@
         "lfric_atm_nwp_gal9_mol-C12_azspice_gnu_fast-debug-32bit",
         "lfric_atm_nwp_gal9_pmsl_jacobi-C48_MG_azspice_gnu_fast-debug-64bit",
         "lfric_atm_nwp_gal9_pmsl_sor-C48_MG_azspice_gnu_fast-debug-64bit",
+        "lfric_atm_nwp_gal9_pmsl_chebyshev-C48_MG_azspice_gnu_fast-debug-64bit",
     ],
     "lfric_atm_nwp_azspice": [
         "lfric_atm_nwp_azspice_developer",
@@ -131,6 +133,7 @@
         "lfric_atm_nwp_gal9_mol-C12_ex1a_cce_fast-debug-32bit",
         "lfric_atm_nwp_gal9_pmsl_jacobi-C224_MG_ex1a_cce_fast-debug-64bit",
         "lfric_atm_nwp_gal9_pmsl_sor-C224_MG_ex1a_cce_fast-debug-64bit",
+        "lfric_atm_nwp_gal9_pmsl_chebyshev-C224_MG_ex1a_cce_fast-debug-64bit",
     ],
     "lfric_atm_nwp_ex1a": [
         "lfric_atm_nwp_ex1a_developer",
