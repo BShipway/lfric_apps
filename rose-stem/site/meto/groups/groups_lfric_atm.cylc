@@ -135,6 +135,11 @@
         "lfric_atm_nwp_gal9_pmsl_sor-C224_MG_ex1a_cce_fast-debug-64bit",
         "lfric_atm_nwp_gal9_pmsl_chebyshev-C224_MG_ex1a_cce_fast-debug-64bit",
     ],
+    "lfric_atm_nwp_pmsl_timing": [
+        "lfric_atm_nwp_gal9_pmsl_jacobi-C224_MG_ex1a_cce_fast-debug-64bit",
+        "lfric_atm_nwp_gal9_pmsl_sor-C224_MG_ex1a_cce_fast-debug-64bit",
+        "lfric_atm_nwp_gal9_pmsl_chebyshev-C224_MG_ex1a_cce_fast-debug-64bit",
+    ],
     "lfric_atm_nwp_ex1a": [
         "lfric_atm_nwp_ex1a_developer",
         "lfric_atm_nwp_ex1a_extra",
