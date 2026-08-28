@@ -71,6 +71,19 @@ build: export PROGRAMS    := $(basename $(notdir $(shell find source -maxdepth 1
 build: export WORKING_DIR := $(WORKING_DIR)
 
 build: export LDFLAGS_GROUPS = OPENMP
+
+# The 'kokkos' transformation emits C++ alongside the PSy layer. Only that
+# option needs a C++ toolchain configured, so every other transformation keeps
+# building exactly as before.
+ifeq ("$(PSYCLONE_TRANSFORMATION)","kokkos")
+  ifndef KOKKOS_ROOT
+    $(error PSYCLONE_TRANSFORMATION=kokkos requires KOKKOS_ROOT to point at a Kokkos installation)
+  endif
+  build: export CXXFLAGS += -std=c++17 -fopenmp -I$(KOKKOS_ROOT)/include
+  build: export LDFLAGS += -L$(KOKKOS_ROOT)/lib -Wl,-rpath=$(KOKKOS_ROOT)/lib
+  build: export EXTERNAL_DYNAMIC_LIBRARIES += kokkoscore
+endif
+
 ifeq "$(PROFILE)" "full-debug"
 build: export FFLAG_GROUPS = OPENMP DEBUG WARNINGS INIT RUNTIME NO_OPTIMISATION FORTRAN_STANDARD
 else ifeq "$(PROFILE)" "fast-debug"
