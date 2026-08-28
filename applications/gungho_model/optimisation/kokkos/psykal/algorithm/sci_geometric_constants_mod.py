@@ -9,14 +9,17 @@
 Local PSyclone transformation script capturing one LFRic cell loop as a
 Kokkos region.
 
-The moist_dyn_gas kernel of the traditional-moisture invoke is replaced by a
-single call with C linkage, and the C++ that implements it is written into
-WORKING_DIR beside the generated PSy layer. The build compiles and links every
-generated .cpp it finds there.
+The get_dz_w3 kernel computes the vertical spacing of the W3 cells from the
+heights at the W2 points either side of them. It was chosen because C16_MG
+measurably enters it, and because the existing backend can already express it:
+the loop is over owned cells, its written field is on W3, and its body is
+arithmetic on scalars and dofmap-indexed fields with no array sections and no
+calls out.
 
-The C16_MG configuration does not reach this invoke: its moisture formulation
-is selected three levels above the kernel. It is captured all the same, as the
-contract the Kokkos backend was built against.
+The invoke runs once per mesh, and the field it writes is held in the
+geometric-constants inventory and read by vertical FFSL transport throughout
+the run. A wrong answer from the generated region therefore shows up in the
+model's own checksums rather than only in a counter.
 
 '''
 import sys
@@ -33,10 +36,9 @@ sys.path.insert(0, str(_PSYKAL[0]))
 
 from kokkos_region import capture           # noqa: E402  needs the path above
 
-# The invoke for moisture_formulation_traditional, and the one coded kernel
-# within it that the prototype captures.
-TARGET_INVOKE = 'invoke_2'
-TARGET_KERNEL = 'moist_dyn_gas_code'
+# The sole invoke of get_dz_w3, and the one coded kernel within it.
+TARGET_INVOKE = 'invoke_12_get_dz_w3_kernel_type'
+TARGET_KERNEL = 'get_dz_w3_code'
 
 
 def trans(psyir):
