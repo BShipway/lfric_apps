@@ -21,6 +21,7 @@ program gungho_model
   use driver_collections_mod, only: init_collections, final_collections
   use driver_comm_mod,        only: init_comm, final_comm
   use driver_config_mod,      only: init_config, final_config
+  use driver_kokkos_mod,      only: init_kokkos, final_kokkos
   use driver_counter_mod,     only: init_counters, final_counters
   use driver_log_mod,         only: init_logger, final_logger
   use driver_time_mod,        only: init_time, final_time
@@ -72,6 +73,10 @@ program gungho_model
 
   call init_comm( application_name, modeldb )
 
+  ! Kokkos is nested inside the lifetime of the model communicator: it must
+  ! start after MPI and stop before it. Does nothing without USE_KOKKOS.
+  call init_kokkos()
+
   call init_config( filename, gungho_required_namelists, &
                     config=modeldb%config )
 
@@ -116,6 +121,7 @@ program gungho_model
   call final_timing( application_name )
   call final_logger( application_name )
   call final_config()
+  call final_kokkos()
   call final_comm( modeldb )
 
 end program gungho_model

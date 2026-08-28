@@ -79,8 +79,25 @@ ifeq ("$(PSYCLONE_TRANSFORMATION)","kokkos")
   ifndef KOKKOS_ROOT
     $(error PSYCLONE_TRANSFORMATION=kokkos requires KOKKOS_ROOT to point at a Kokkos installation)
   endif
-  build: export CXXFLAGS += -std=c++17 -fopenmp -I$(KOKKOS_ROOT)/include
+  # USE_KOKKOS is set for both languages: it selects the live body of
+  # driver_kokkos_mod.F90 and of kokkos_runtime.cpp, which between them are the
+  # only place the Kokkos runtime is started and stopped. The C++ rule in
+  # compile.mk passes CXXFLAGS but not the Fortran macro list, so the same
+  # macro has to be named twice.
+  build: export PRE_PROCESS_MACROS += USE_KOKKOS
+  build: export CXXFLAGS += -std=c++17 -fopenmp -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include
   build: export LDFLAGS += -L$(KOKKOS_ROOT)/lib -Wl,-rpath=$(KOKKOS_ROOT)/lib
+  # libxios.a is built against the pre-C++11 libstdc++ string ABI; Kokkos is
+  # built against the current one. The two disagree about the layout of
+  # std::string, and so about any class holding one -- but the mangled names of
+  # affected templates such as std::__detail::_Scanner<char> are identical in
+  # both, because those names carry no ABI tag. Linking generated Kokkos code
+  # into the executable makes the linker export the executable's copies, which
+  # are XIOS's; ELF then gives them precedence over libkokkoscore's own, so
+  # Kokkos calls into code compiled for the other ABI and segfaults before main.
+  # Keeping XIOS's copies out of .dynsym leaves each library binding to its own,
+  # which is what an unmixed build would have done.
+  build: export LDFLAGS += -Wl,--exclude-libs,libxios.a
   build: export EXTERNAL_DYNAMIC_LIBRARIES += kokkoscore
 endif
 
