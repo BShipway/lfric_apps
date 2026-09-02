@@ -95,6 +95,46 @@ ifeq ($(firstword $(subst -, ,$(PSYCLONE_TRANSFORMATION))),kokkos)
   # macro has to be named twice.
   build: export PRE_PROCESS_MACROS += USE_KOKKOS
   build: export CXXFLAGS += -std=c++17 -fopenmp -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include
+  # The C++ optimisation level, matched to the Fortran side's for the same
+  # profile. There is nothing to inherit: lfric_core's compiler tables define
+  # flag groups for Fortran only, and compile.mk's .cpp rule passes CXXFLAGS
+  # and nothing else. gfortran.mk maps NO_OPTIMISATION to -O0,
+  # SAFE_OPTIMISATION to -Og and RISKY_OPTIMISATION to -Ofast; the three lines
+  # below say the same thing to g++.
+  #
+  # WITHOUT THEM THE GENERATED C++ IS COMPILED AT -O0, because g++ optimises
+  # nothing by default where the Fortran rule always passes a group. That is
+  # not a small difference for this code. A generated kernel is Kokkos views,
+  # lambdas and index arithmetic, nearly all of it in headers instantiated in
+  # our own translation unit, so -O0 leaves every view accessor and every
+  # functor call out of line -- while libkokkoscore itself, coming from Spack,
+  # is optimised, which is why the omission does not show up as an obviously
+  # broken build.
+  #
+  # It was found by measurement rather than by reading: stage 7 timed the
+  # Kokkos regions against the Fortran loops they replaced and got ratios of
+  # 6-32x, which sent someone looking for a compile line.
+  # psy-ir-aidev/validation/performance/README.md records both readings.
+  #
+  # -Ofast carries -ffast-math, which is as much of a hazard in C++ as it is in
+  # Fortran. It is mirrored rather than softened because a C++ side compiled
+  # differently from the Fortran side is the defect being fixed here, and a
+  # profile that wants IEEE semantics should say so for both languages at once.
+  #
+  # -g is on all three because the Fortran side's DEBUG group is: every
+  # FFLAG_GROUPS line below names DEBUG, production included.
+  #
+  # There is deliberately no else-error here. The FFLAG_GROUPS block below
+  # covers the same three profiles and errors on anything else, so an
+  # unrecognised PROFILE stops the build there rather than reaching a link.
+  # A second copy of that error would only be a second thing to keep in step.
+  ifeq "$(PROFILE)" "full-debug"
+    build: export CXXFLAGS += -O0 -g
+  else ifeq "$(PROFILE)" "fast-debug"
+    build: export CXXFLAGS += -Og -g
+  else ifeq "$(PROFILE)" "production"
+    build: export CXXFLAGS += -Ofast -g
+  endif
   build: export LDFLAGS += -L$(KOKKOS_ROOT)/lib -Wl,-rpath=$(KOKKOS_ROOT)/lib
   # libxios.a is built against the pre-C++11 libstdc++ string ABI; Kokkos is
   # built against the current one. The two disagree about the layout of
