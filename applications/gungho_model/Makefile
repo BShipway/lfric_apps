@@ -72,10 +72,19 @@ build: export WORKING_DIR := $(WORKING_DIR)
 
 build: export LDFLAGS_GROUPS = OPENMP
 
-# The 'kokkos' transformation emits C++ alongside the PSy layer. Only that
-# option needs a C++ toolchain configured, so every other transformation keeps
+# A 'kokkos' transformation emits C++ alongside the PSy layer. Only those
+# options need a C++ toolchain configured, so every other transformation keeps
 # building exactly as before.
-ifeq ("$(PSYCLONE_TRANSFORMATION)","kokkos")
+#
+# The test is on the first hyphen-separated word rather than the whole name, so
+# that a variant of the kokkos transformation is configured like it. 'kokkos'
+# alone was the condition until 'kokkos-timed' was added and silently got no
+# CXXFLAGS: mpic++ was then invoked bare, and the generated translation units
+# failed on '#include <Kokkos_Core.hpp>: No such file or directory' at the
+# first compile after a PSyclone step that had gone perfectly. Matching the
+# word keeps 'minimum-timed' and 'production-timed' out while admitting
+# 'kokkos-timed' and any later 'kokkos-<variant>'.
+ifeq ($(firstword $(subst -, ,$(PSYCLONE_TRANSFORMATION))),kokkos)
   ifndef KOKKOS_ROOT
     $(error PSYCLONE_TRANSFORMATION=kokkos requires KOKKOS_ROOT to point at a Kokkos installation)
   endif
@@ -86,6 +95,46 @@ ifeq ("$(PSYCLONE_TRANSFORMATION)","kokkos")
   # macro has to be named twice.
   build: export PRE_PROCESS_MACROS += USE_KOKKOS
   build: export CXXFLAGS += -std=c++17 -fopenmp -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include
+  # The C++ optimisation level, matched to the Fortran side's for the same
+  # profile. There is nothing to inherit: lfric_core's compiler tables define
+  # flag groups for Fortran only, and compile.mk's .cpp rule passes CXXFLAGS
+  # and nothing else. gfortran.mk maps NO_OPTIMISATION to -O0,
+  # SAFE_OPTIMISATION to -Og and RISKY_OPTIMISATION to -Ofast; the three lines
+  # below say the same thing to g++.
+  #
+  # WITHOUT THEM THE GENERATED C++ IS COMPILED AT -O0, because g++ optimises
+  # nothing by default where the Fortran rule always passes a group. That is
+  # not a small difference for this code. A generated kernel is Kokkos views,
+  # lambdas and index arithmetic, nearly all of it in headers instantiated in
+  # our own translation unit, so -O0 leaves every view accessor and every
+  # functor call out of line -- while libkokkoscore itself, coming from Spack,
+  # is optimised, which is why the omission does not show up as an obviously
+  # broken build.
+  #
+  # It was found by measurement rather than by reading: stage 7 timed the
+  # Kokkos regions against the Fortran loops they replaced and got ratios of
+  # 6-32x, which sent someone looking for a compile line.
+  # psy-ir-aidev/validation/performance/README.md records both readings.
+  #
+  # -Ofast carries -ffast-math, which is as much of a hazard in C++ as it is in
+  # Fortran. It is mirrored rather than softened because a C++ side compiled
+  # differently from the Fortran side is the defect being fixed here, and a
+  # profile that wants IEEE semantics should say so for both languages at once.
+  #
+  # -g is on all three because the Fortran side's DEBUG group is: every
+  # FFLAG_GROUPS line below names DEBUG, production included.
+  #
+  # There is deliberately no else-error here. The FFLAG_GROUPS block below
+  # covers the same three profiles and errors on anything else, so an
+  # unrecognised PROFILE stops the build there rather than reaching a link.
+  # A second copy of that error would only be a second thing to keep in step.
+  ifeq "$(PROFILE)" "full-debug"
+    build: export CXXFLAGS += -O0 -g
+  else ifeq "$(PROFILE)" "fast-debug"
+    build: export CXXFLAGS += -Og -g
+  else ifeq "$(PROFILE)" "production"
+    build: export CXXFLAGS += -Ofast -g
+  endif
   build: export LDFLAGS += -L$(KOKKOS_ROOT)/lib -Wl,-rpath=$(KOKKOS_ROOT)/lib
   # libxios.a is built against the pre-C++11 libstdc++ string ABI; Kokkos is
   # built against the current one. The two disagree about the layout of
@@ -110,17 +159,25 @@ build: export FFLAG_GROUPS = OPENMP DEBUG WARNINGS RISKY_OPTIMISATION
 else
   $(error Unrecognised profile "$(PROFILE)". Must be one of full-debug, fast-debug or production)
 endif
+# The namelist loaders are generated before the internal dependencies are
+# imported, not after them, because importing a subproject PSyclones it, and a
+# transformation may have to resolve a module that only exists once these have
+# run. planet_config_mod is the case that forced the order: LFRicKokkosTrans
+# refuses moist_dyn_factors_alg_mod in science/gungho with "cannot type
+# 'recip_epsilon' without the source of 'planet_config_mod'", because
+# rose_picker has not yet written that module into WORKING_DIR/configuration.
+# psyclone_psykal.mk passes -d WORKING_DIR, which PSyclone searches
+# recursively for modules, so generating them first is all that is needed.
+#
+# Neither step reads anything the import loop produces: extract_meta.mk works
+# from APPS_ROOT_DIR and dependencies.yaml, and configuration.mk from
+# META_FILE_DIR/rose-meta.conf and ROSE_META_DIRS. configuration.mk is passed
+# SOURCE_DIR only because its header mentions one; no rule in it uses it.
+#
+# Extracting the application's own source stays where it was, after the
+# import loop, so that the precedence between an application file and a
+# subproject file of the same name is unchanged.
 build: ALWAYS
-	$(call MESSAGE,========================================)
-	$(call MESSAGE,Importing internal dependencies...)
-	$(call MESSAGE,========================================)
-	$(Q)for SUBPROJECT in $(INTERNAL_DEPENDENCIES) ; do \
-	    $(MAKE) $(QUIET_ARG) -f $$SUBPROJECT/build/import.mk ; done
-	$(call MESSAGE,========================================)
-	$(call MESSAGE,Extracting $(PROJECT_NAME))
-	$(call MESSAGE,========================================)
-	$Q$(MAKE) $(QUIET_ARG) -f $(LFRIC_BUILD)/extract.mk \
-	          SOURCE_DIR=source
 	$(call MESSAGE,========================================)
 	$(call MESSAGE,Extracting External Rose Metadata)
 	$(call MESSAGE,========================================)
@@ -132,6 +189,16 @@ build: ALWAYS
 	          PROJECT=gungho \
 	          SOURCE_DIR=source \
 	          META_FILE_DIR=$(META_FILE_DIR)
+	$(call MESSAGE,========================================)
+	$(call MESSAGE,Importing internal dependencies...)
+	$(call MESSAGE,========================================)
+	$(Q)for SUBPROJECT in $(INTERNAL_DEPENDENCIES) ; do \
+	    $(MAKE) $(QUIET_ARG) -f $$SUBPROJECT/build/import.mk ; done
+	$(call MESSAGE,========================================)
+	$(call MESSAGE,Extracting $(PROJECT_NAME))
+	$(call MESSAGE,========================================)
+	$Q$(MAKE) $(QUIET_ARG) -f $(LFRIC_BUILD)/extract.mk \
+	          SOURCE_DIR=source
 	$(call MESSAGE,========================================)
 	$(call MESSAGE,PSycloning $(PROJECT_NAME))
 	$(call MESSAGE,========================================)
