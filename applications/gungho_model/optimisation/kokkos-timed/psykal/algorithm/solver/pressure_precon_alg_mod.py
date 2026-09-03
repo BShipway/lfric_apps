@@ -27,10 +27,23 @@ automatic local arrays,
     real(kind=r_single), dimension(nlayers) :: x_new, tri_plus_new
 
 whose extent is a runtime value, so neither can be a C++ local. They are
-placed in Kokkos team scratch, private to the team rank running the cell,
-which puts the region on a TeamPolicy rather than the RangePolicy the other
-three captured regions use. Two cells sharing a team therefore do not share a
-temporary, which is what makes the parallelism over columns sound.
+placed in Kokkos scratch, requested PerThread and private to the team rank
+running the cell, which puts the region on a TeamPolicy rather than the
+RangePolicy the other three regions captured by then use. Two cells sharing a
+team therefore do not share a temporary, which is what makes the parallelism
+over columns sound.
+
+Stage 8 added a third launch shape and left this region the only one on the
+second. Its two sweeps are recurrences, so
+DependencyTools.can_loop_be_parallelised refuses its level loops and the
+region keeps the flat team launch: a team of team_size_recommended ranks,
+each rank taking one cell and its own team.thread_scratch(0) slice, with an
+early return guarding the tail of the last league. The five other captured
+regions moved to the hierarchical launch, TeamPolicy(ncells, Kokkos::AUTO)
+with the level loops spread as TeamVectorRange. Being refused that shape by
+measurement rather than left out of it is what makes this region the control
+the launch-shape stage measured against: its generated C++ is byte-identical
+across the change.
 
 Like inject_wt_to_sh_w3 this kernel is kind-polymorphic.
 sci_tri_solve_kernel_mod writes tri_solve_code as a generic interface over
