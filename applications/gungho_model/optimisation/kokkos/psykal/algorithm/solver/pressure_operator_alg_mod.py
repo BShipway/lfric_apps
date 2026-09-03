@@ -51,9 +51,25 @@ The kernel holds one automatic local array,
 
     real(kind=r_solver), dimension(max_length,4) :: coeff
 
-whose extent is a runtime value, so it is placed in Kokkos team scratch and
-the region is launched over a TeamPolicy rather than a RangePolicy, as
-tri_solve's is.
+whose extent is a runtime value, so it is placed in Kokkos scratch and the
+region is launched over a TeamPolicy rather than a RangePolicy, as tri_solve's
+is.
+
+Stage 8 separated the two. This kernel's level loops carry no recurrence, so
+the region moved to the hierarchical launch -- TeamPolicy(ncells,
+Kokkos::AUTO), one team per cell, the level loops spread as TeamVectorRange
+with a team_barrier after each and the statements that are not level loops
+wrapped in Kokkos::single(Kokkos::PerTeam) -- while tri_solve keeps the flat
+team launch. It is therefore the only captured region whose scratch changed
+placement, from team.thread_scratch(0) to team.team_scratch(0): a whole team
+now works one cell, so coeff is shared by the team rather than private to a
+rank.
+
+The generated region has four TeamVectorRange loops where the path C16_MG
+runs has three. The fourth is inside the limited_area branch, which this
+configuration does not take, and it is there because that branch's
+coeff(1,:) = 0.0 array section is lowered to a level loop before the launch
+shape is chosen -- so it acquires the shape like any other level loop.
 
 The kernel declares 'cell' as a local of its own and counts stencil branches
 with it. That is the name the generated launch gives its own cell index, and
