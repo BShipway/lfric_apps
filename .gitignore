@@ -68,3 +68,15 @@ interfaces/**/bin
 interfaces/**/documents
 interfaces/**/working
 interfaces/**/test
+
+# G0's C48 configuration is tracked; the example* rule above would ignore it.
+#
+# 'applications/**/example*/' ignores the whole directory, not just its
+# contents, and git cannot re-include a file whose parent directory is
+# excluded -- so the directory has to be un-ignored before the mesh file inside
+# it can be ignored again. Both lines are needed and the order is not free.
+#
+# example/ is unaffected: its files are already tracked, and a tracked file
+# stays tracked whatever .gitignore says.
+!applications/gungho_model/example_C48/
+applications/gungho_model/example_C48/*.nc
