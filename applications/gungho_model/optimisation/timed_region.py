@@ -8,11 +8,17 @@
 '''
 Caliper placement shared by the '-timed' transformations.
 
-One table, CAPTURED_REGIONS, names the seven loops the Kokkos transformation
-captures. Every timed build puts a caliper on those seven and on nothing else,
+One table, CAPTURED_REGIONS, names the eight loops the Kokkos transformation
+captures. Every timed build puts a caliper on those eight and on nothing else,
 so a row in one build's timer.txt covers the same executions as the row with
 the same name in another's. That is the whole purpose of this module: the
 comparison is only a comparison if both sides bracket the same work.
+
+It was seven until stage 10, which added apply_mixed_u_operator. That row is
+the first whose invoke keeps coded kernels of its own beside the captured one,
+so it is also the first for which 'the same work' has to be read carefully:
+the caliper brackets one of the invoke's three cell loops in both builds, and
+the other two are Fortran on both sides.
 
 WHY THIS EXISTS RATHER THAN psyclone_tools.profile_loops
 
@@ -74,7 +80,7 @@ microseconds that is not negligible, and it falls on the baseline and the
 Kokkos build alike -- inflating both sides of the comparison this stage exists
 to make.
 
-*A kernel is not a call site.* Four of the seven captured kernels are invoked
+*A kernel is not a call site.* Four of the eight captured kernels are invoked
 from more than one algorithm:
 
     fv_difference_z      ffsl_vert_alg_mod, flux_precomputations_mod
@@ -84,6 +90,11 @@ from more than one algorithm:
     moist_dyn_gas        init_gungho_lbcs_alg_mod, moist_dyn_factors_alg_mod
     sample_w3_to_wtheta  map_fd_to_prognostics_alg_mod,
                          physics_mappings_alg_mod, si_operators_alg_mod
+
+apply_mixed_u_operator, the eighth, is not among them: mixed_operator_alg_mod
+holds the model's only invoke of it. Selecting by (module, invoke, kernel) is
+therefore redundant for that row and is used anyway, because a table where one
+row is selected differently from the rest is a table nobody can read.
 
 The Kokkos build captures one call site of each. A caliper placed by kernel name
 alone would, in that build, accumulate the captured Kokkos executions and the
@@ -146,7 +157,7 @@ REGION_MODULE = 'region'
 #: (PSy-layer module, invoke, coded kernel). Each row is the TARGET_INVOKE and
 #: TARGET_KERNEL of one script under kokkos/psykal/, with the PSy module the
 #: algorithm generates; the Kokkos scripts check themselves against it, so
-#: capturing an eighth region without adding it here fails that build rather
+#: capturing a ninth region without adding it here fails that build rather
 #: than producing a Kokkos time with no baseline beside it.
 #:
 #: Every row must name a distinct kernel, since the kernel alone is the region
@@ -173,6 +184,9 @@ CAPTURED_REGIONS = (
     ('pressure_precon_alg_mod_psy',
      'invoke_0_tri_solve_kernel_type',
      'tri_solve_code'),
+    ('mixed_operator_alg_mod_psy',
+     'invoke_apply_split_mixed_operator',
+     'apply_mixed_u_operator_code'),
 )
 
 #: Loop types that carry a coded kernel but are the inner half of a colouring,
@@ -306,7 +320,7 @@ def time_captured_loops(psyir):
     Places a caliper round each captured call site this PSy layer holds.
 
     Called from the global script of a Fortran timed transformation, which
-    PSyclone runs once per algorithm. Most algorithms hold none of the seven
+    PSyclone runs once per algorithm. Most algorithms hold none of the eight
     and nothing happens; where one is held, the loop is bracketed under the
     same region name the Kokkos build gives its captured region.
 
