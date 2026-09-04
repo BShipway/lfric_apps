@@ -98,6 +98,57 @@ not depend on the order the two are called in. A candidate that turns out to
 be inside a ProfileNode anyway is a fact this module does not understand, and
 it is refused rather than skipped.
 
+WHAT A CELL LOOP IS, AND WHAT THE 23 ARE
+
+'Runs a coded kernel' is not the same predicate as 'is a cell loop', and the
+first version of this module used it as though it were. It placed 660 calipers
+on the built 'minimum-census' tree where the arithmetic above wants 637: 637 of
+them wrap a 'DO cell =' and 23 wrap a 'DO df ='.
+
+The 23 are coded kernels declaring 'operates_on = DOF' -- twelve distinct ones,
+among them evap_condense_code, theta_e_code, swift_inner_update_code and
+convert_cart2sphere_vector_code. They are not built-ins, which coded_kernels()
+already excludes; they are hand-written kernels whose iteration space is the
+dof rather than the cell column.
+
+They are excluded because the level is named cell_loops and a dof loop is not a
+cell loop. The sum above is asserted against 'grep -c "DO cell ="' by
+tests/test_cell_loop_census.sh, so counting one in it would make the name
+untrue and the only automated check of the placement impossible to satisfy.
+
+WHAT THE CRITERION IS NOT, AND WHY THAT IS WORTH SAYING
+
+It is tempting to say instead that a loop belongs in the denominator when
+LFRicKokkosTrans could capture it, since captured/cell_loops is the ratio being
+built. That reading is wrong and the first attempt at this fix took it, using
+iteration_space == 'cell_column' -- the exact string
+LFRicKokkosTrans._validate_loop tests. The build then declined 'DO cell ='
+loops in the two halo spaces and in 'owned_cell_column', because
+_validate_loop refuses a halo depth as well as a non-cell iteration space.
+
+Two things are wrong with it. It makes the name untrue in the other direction:
+a halo cell loop is a loop over cell columns whatever the transformation
+currently does about it. And it makes the ratio move for the wrong reason --
+a denominator defined as 'what the transformation accepts' rises towards 1 as
+the transformation's refusals grow, so a *narrower* capability would score
+better. The catalogue in psy-ir-aidev/docs/reference/ is where a refusal
+belongs; this level is loop structure and is measured independently of it.
+
+So the criterion is the iteration space alone, and all four members of
+LFRicConstants.CELL_COLUMN_ITERATION_SPACES count. Refusals of every other
+kind -- halo depths, stencils, unsupported intrinsics -- leave the denominator
+where it is, which is what makes captured/cell_loops mean something as the
+capability widens.
+
+The cost of excluding the dof loops is that their time is in none of the levels
+and falls into the residual bin/measure-timestep-breakdown prints, where it
+cannot be told apart from time outside the PSy layer altogether. That is a
+known shortfall rather than a hidden one: census_report names the count and the
+iteration space in the build log, so a build says how many loops it did not
+reach. Measuring them under a second shared name -- 'region:dof_loops', the
+same mechanism again -- would close it, and is left as a decision rather than
+taken here, because it adds a level the plan for this gate does not have.
+
 WHERE THIS FILE SITS
 
 Beside timed_region.py at the root of optimisation/, for the reason given at
@@ -106,6 +157,7 @@ names have to agree between them. The scripts reach it by walking their own
 parents for the directory holding it, rather than by a fixed number of
 '.parent's.
 '''
+from psyclone.domain.lfric import LFRicConstants
 from psyclone.psyGen import InvokeSchedule
 from psyclone.psyir.nodes import Loop, ProfileNode
 from psyclone.psyir.transformations import ProfileTrans
@@ -123,6 +175,33 @@ from timed_region import (
 #: places names it, so timer.txt holds one 'region:cell_loops' row however many
 #: call sites were wrapped, and num_calls on that row is the number of entries.
 CENSUS_REGION = 'cell_loops'
+
+
+def cell_iteration_spaces():
+    '''
+    The iteration spaces that make a loop a cell loop.
+
+    LFRicLoop.iteration_space is its kernel's operates_on, so a loop is a cell
+    loop exactly when it holds one of these. Taken from LFRicConstants rather
+    than restated, for the reason INNER_COLOUR_LOOPS is imported from
+    timed_region: a list of iteration-space names copied into this file would
+    be a second place for PSyclone's to disagree with.
+
+    There are four, not one. Beside 'cell_column' are 'owned_cell_column' and
+    the two halo spaces, and all four generate a 'DO cell ='. Colouring does
+    not change the attribute -- LFRicColourTrans copies iteration_space onto
+    both halves of the split -- so this predicate holds in a coloured build,
+    where loop_type would not.
+
+    A routine and not a module constant: LFRicConstants refuses to be
+    constructed before PSyclone's config file is loaded, which has not happened
+    when this module is imported. It has by the time a transformation runs.
+
+    :returns: the cell-column iteration space names.
+    :rtype: tuple[str, ...]
+
+    '''
+    return tuple(LFRicConstants().CELL_COLUMN_ITERATION_SPACES)
 
 
 def _captured_loops(schedule):
@@ -151,9 +230,9 @@ def _captured_loops(schedule):
             if row_module.lower() == module and row_invoke.lower() == name]
 
 
-def _census_loops(schedule):
+def _uncaptured_kernel_loops(schedule):
     '''
-    The loops in a schedule this module places a shared caliper on.
+    Every outermost coded-kernel loop in a schedule that timed_region leaves.
 
     A loop qualifies when it runs at least one coded kernel, is not the inner
     half of a colouring, and is not one of the loops timed_region brackets. The
@@ -161,10 +240,14 @@ def _census_loops(schedule):
     excludes it: timing it would time a fraction of the work and would not
     correspond to anything in an uncoloured build.
 
+    This is the superset _census_loops selects from. It is a routine of its own
+    so that the loops the census declines can be counted and reported rather
+    than disappearing between two predicates.
+
     :param schedule: the invoke schedule to search.
     :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
 
-    :returns: the loops to wrap, outermost first in schedule order.
+    :returns: the loops, outermost first in schedule order.
     :rtype: list[:py:class:`psyclone.psyir.nodes.Loop`]
 
     :raises RuntimeError: if a row of CAPTURED_REGIONS naming this schedule
@@ -180,6 +263,56 @@ def _census_loops(schedule):
             if loop.loop_type not in INNER_COLOUR_LOOPS
             and loop.coded_kernels()
             and id(loop) not in captured]
+
+
+def _census_loops(schedule):
+    '''
+    The loops in a schedule this module places a shared caliper on.
+
+    The uncaptured coded-kernel loops that iterate over cell columns. The
+    restriction to cell_iteration_spaces() is what makes the level's name
+    true;
+    see WHAT A CELL LOOP IS, AND WHAT THE 23 ARE in this module's docstring.
+
+    :param schedule: the invoke schedule to search.
+    :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
+
+    :returns: the loops to wrap, outermost first in schedule order.
+    :rtype: list[:py:class:`psyclone.psyir.nodes.Loop`]
+
+    :raises RuntimeError: if a row of CAPTURED_REGIONS naming this schedule
+        cannot be resolved to exactly one loop.
+
+    '''
+    spaces = cell_iteration_spaces()
+    return [loop for loop in _uncaptured_kernel_loops(schedule)
+            if loop.iteration_space in spaces]
+
+
+def _declined_loops(schedule):
+    '''
+    The uncaptured coded-kernel loops that are not over cell columns.
+
+    Reported rather than silently dropped: they are the term that makes the
+    sum of the timed levels fall short of the model's kernel work, and the
+    build log is the only place their number appears.
+
+    :param schedule: the invoke schedule to search.
+    :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
+
+    :returns: the loops, keyed by the iteration space each carries.
+    :rtype: dict[str, list[:py:class:`psyclone.psyir.nodes.Loop`]]
+
+    :raises RuntimeError: if a row of CAPTURED_REGIONS naming this schedule
+        cannot be resolved to exactly one loop.
+
+    '''
+    spaces = cell_iteration_spaces()
+    declined = {}
+    for loop in _uncaptured_kernel_loops(schedule):
+        if loop.iteration_space not in spaces:
+            declined.setdefault(loop.iteration_space, []).append(loop)
+    return declined
 
 
 def _refuse_nesting(candidates, schedule):
@@ -297,11 +430,15 @@ def census_report(psyir):
     '''
     placed = {}
     skipped = {}
+    declined = {}
     for schedule in psyir.walk(InvokeSchedule):
         module = _module_name(schedule)
         placed.setdefault(module, 0)
         skipped.setdefault(module, 0)
         skipped[module] += len(_captured_loops(schedule))
+        for space, loops in _declined_loops(schedule).items():
+            spaces = declined.setdefault(module, {})
+            spaces[space] = spaces.get(space, 0) + len(loops)
 
     for node in psyir.walk(ProfileNode):
         if (node.module_name == REGION_MODULE
@@ -310,6 +447,12 @@ def census_report(psyir):
             placed[module] = placed.get(module, 0) + 1
 
     for module in sorted(placed):
+        # The declined clause is printed only where there is something to
+        # print, so that a module reaching every one of its kernel loops says
+        # so by saying nothing, and grep finds the exceptions.
+        spaces = declined.get(module, {})
+        note = ''.join(f", declining {n} over '{space}'"
+                       for space, n in sorted(spaces.items()))
         print(f"cell_loop_census: placed {placed[module]} "
               f"{REGION_MODULE}:{CENSUS_REGION} calipers in {module}, "
-              f"leaving {skipped.get(module, 0)} to timed_region")
+              f"leaving {skipped.get(module, 0)} to timed_region{note}")
