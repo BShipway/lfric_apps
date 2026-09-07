@@ -80,3 +80,5 @@ interfaces/**/test
 # stays tracked whatever .gitignore says.
 !applications/gungho_model/example_C48/
 applications/gungho_model/example_C48/*.nc
+!applications/gungho_model/example_C144/
+applications/gungho_model/example_C144/*.nc
