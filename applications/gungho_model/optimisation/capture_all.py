@@ -100,6 +100,24 @@ REGIONS_DIR = 'kokkos_regions'
 #: Sites that are not captured, as (psy module, invoke, kernel) -> reason. All
 #: three names lower-case. Empty is the intended state; see the docstring.
 SKIP = {
+    # validate() accepts these two loops and KokkosWriter then refuses them:
+    # the kernel body reads MINVAL, which the C writer does not yet spell, and
+    # nothing in the transformation's contract checks an intrinsic against the
+    # writer's table before apply(). Left as Fortran until the
+    # unsupported-intrinsic branch of phase 5 gives the writer MINVAL, which
+    # also closes the validate/apply gap the coverage survey already sees
+    # ("unsupported-intrinsic" on both rows). Found by the wave-A whole-model
+    # build on 2026-09-07, once module-constant stopped refusing them first.
+    ('end_of_transport_step_alg_mod_psy',
+     'invoke_5_conservative_neg_fix_kernel_type',
+     'conservative_neg_fix_code'):
+        "validate accepts, KokkosWriter refuses MINVAL; cleared by "
+        "feat/kokkos-unsupported-intrinsic",
+    ('end_of_transport_step_alg_mod_psy',
+     'invoke_14_conservative_neg_fix_kernel_type',
+     'conservative_neg_fix_code'):
+        "validate accepts, KokkosWriter refuses MINVAL; cleared by "
+        "feat/kokkos-unsupported-intrinsic",
 }
 
 
