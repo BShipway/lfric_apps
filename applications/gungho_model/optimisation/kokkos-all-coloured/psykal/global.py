@@ -17,10 +17,30 @@ cells share rather than the atomic one. Cells of one colour meet at no dof,
 so the update is a plain read-modify-write and the caller enters the region
 once per colour.
 
-Both answers are correct and the two builds capture the same sites, so this
-tree exists to be compared: 'kokkos-all' and 'kokkos-all-coloured' must
-reproduce the same checksums as 'minimum', by two different routes through
-the same regions.
+WHAT THIS TREE CAPTURES THAT 'kokkos-all' DOES NOT
+
+An atomic answers a read-modify-write of one element and nothing else, so
+LFRicKokkosTrans refuses a kernel that updates a shared field with a
+whole-array expression, or with any other statement no single atomic carries
+out, and says 'Colour the loop instead'. Colouring is that instruction taken:
+it puts the cells that meet at a dof in different launches, so the shape of
+the update stops being a question. This tree therefore asks the coloured arm
+first for a loop whose kernel has a shared write, and falls back to the atomic
+arm where the coloured one is refused. That ordering is what lets it capture
+those call sites; 'kokkos-all' asks the atomic arm only and leaves them as
+Fortran. The two trees no longer capture the same sites, and the difference is
+exactly the loops colouring alone can take.
+
+'kokkos-all' is deliberately not changed to match. Its checksums are
+bit-identical to the Fortran reference and it is the control every other
+profile is measured against, so a capture that widened it would move the
+control and the comparison with it. Colouring changes the order the
+contributions to a shared dof are summed, which is a floating-point
+difference: expected here, and a regression there.
+
+Both answers are correct, so this tree exists to be compared: what
+'kokkos-all' and 'kokkos-all-coloured' both capture they must capture to the
+same checksums as 'minimum', by two different routes through the same regions.
 
 The capture itself is capture_all.py at the root of optimisation/, shared
 with 'kokkos-all' and 'kokkos-all-timed' so that the trees cannot drift, and
