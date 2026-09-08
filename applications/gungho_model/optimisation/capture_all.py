@@ -100,23 +100,6 @@ REGIONS_DIR = 'kokkos_regions'
 #: Sites that are not captured, as (psy module, invoke, kernel) -> reason. All
 #: three names lower-case. Empty is the intended state; see the docstring.
 SKIP = {
-    # The wave-B whole-model build generated this region and the C++ did not
-    # compile: the kernel's `lhs_e = matmul(m3exner(ik,:,:), p_e) - matmul(...)
-    # + matmul(...)` is a whole-array assignment whose right-hand side is
-    # arithmetic over three contractions, and the lowering wrote the combined
-    # element to `lhs_e` rather than to `lhs_e(i)`. A defect in the array
-    # expression lowering, found 2026-09-08, being fixed on
-    # feat/kokkos-array-section; both call sites reach one symbol.
-    ('mixed_operator_alg_mod_psy',
-     'invoke_analytic_elim_mixed_lhs',
-     'apply_elim_mixed_lp_operator_code'):
-        "generated C++ assigns a scalar to the View lhs_e for an arithmetic of "
-        "contractions; fixed on feat/kokkos-array-section",
-    ('mixed_operator_alg_mod_psy',
-     'invoke_apply_discretely_eliminated_mixed_lhs',
-     'apply_elim_mixed_lp_operator_code'):
-        "generated C++ assigns a scalar to the View lhs_e for an arithmetic of "
-        "contractions; fixed on feat/kokkos-array-section",
 }
 
 
