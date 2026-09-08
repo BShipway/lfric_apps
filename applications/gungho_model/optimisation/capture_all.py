@@ -71,6 +71,21 @@ PSy layer, which is minutes rather than the hours a model rebuild takes. An
 entry with no reason is refused at import, so nothing can be skipped quietly,
 and the phase-5 exit criterion requires this table to be empty.
 
+COLOURED BUILDS
+
+capture(psyir, coloured=True) colours a loop before capturing it, whenever
+its kernel writes a field two cells share. That is the alternative answer to
+a shared write: LFRicKokkosTrans generates a Kokkos::atomic_add for such an
+update by default, and takes a plain read-modify-write when the loop it is
+given is already coloured, because the cells of one colour meet at no dof.
+The two builds capture the same sites and differ only in what the region
+does with the update, which is what makes their checksums comparable.
+
+Only a loop the transformation has already accepted is coloured, so a
+colouring never changes a PSy layer this build then leaves as Fortran, and a
+colouring LFRicColourTrans refuses leaves the loop to the atomic arm rather
+than dropping the capture.
+
 TIMED BUILDS
 
 capture(psyir, timed=True) places a caliper on each captured call whose site is
@@ -85,12 +100,18 @@ comparison against the other timed builds.
 import os
 from pathlib import Path
 
+from psyclone.core import AccessType
 from psyclone.domain.lfric import LFRicLoop
 from psyclone.domain.lfric.lfric_builtins import LFRicBuiltIn
 from psyclone.domain.lfric.transformations import LFRicKokkosTrans
 from psyclone.psyGen import InvokeSchedule
 from psyclone.psyir.nodes import Call, Container
 from psyclone.psyir.transformations import TransformationError
+from psyclone.transformations import LFRicColourTrans
+
+#: The accesses that make two cells of one launch update one dof. Read from
+#: the kernel's metadata, which is what LFRicKokkosTrans reads too.
+SHARED_ACCESSES = (AccessType.INC, AccessType.READINC)
 
 #: Where the generated translation units and the manifest fragments go, under
 #: WORKING_DIR. Named once here and in psy-ir-aidev's bin/capture-manifest and
@@ -240,7 +261,53 @@ def _write_manifest(regions, module, rows):
     os.replace(temporary, path)
 
 
-def capture(psyir, timed=False):
+def _shares_a_write(kernel):
+    '''
+    Whether two cells of one launch would update the same dof.
+
+    :param kernel: the coded kernel the loop calls.
+    :type kernel: :py:class:`psyclone.domain.lfric.LFRicKern`
+
+    :returns: whether any argument is incremented rather than written.
+    :rtype: bool
+
+    '''
+    return any(argument.access in SHARED_ACCESSES
+               for argument in kernel.arguments.args)
+
+
+def _colour(loop, schedule, kernel):
+    '''
+    Colours a loop and returns the inner loop, over the cells of one colour.
+
+    A colouring LFRicColourTrans refuses is not an error here. It leaves the
+    loop as it was, and LFRicKokkosTrans then generates the atomic update it
+    generates for every uncoloured loop, so the site is still captured.
+
+    :param loop: the loop to colour.
+    :type loop: :py:class:`psyclone.domain.lfric.LFRicLoop`
+    :param schedule: the invoke schedule holding it.
+    :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
+    :param kernel: the loop's kernel, which the colouring moves into the
+        inner loop and which is how that loop is found again.
+    :type kernel: :py:class:`psyclone.domain.lfric.LFRicKern`
+
+    :returns: the cells-in-colour loop, or the original loop if the
+        colouring was refused.
+    :rtype: :py:class:`psyclone.domain.lfric.LFRicLoop`
+
+    '''
+    try:
+        LFRicColourTrans().apply(loop)
+    except TransformationError as err:
+        print(f"Kokkos: not coloured, {kernel.name.lower()}: {err}")
+        return loop
+    return [inner for inner in schedule.walk(LFRicLoop)
+            if inner.loop_type == 'cells_in_colour'
+            and any(each is kernel for each in inner.kernels())][0]
+
+
+def capture(psyir, timed=False, coloured=False):
     '''
     Captures every loop the transformation accepts, in every invoke.
 
@@ -253,6 +320,9 @@ def capture(psyir, timed=False):
     :type psyir: :py:class:`psyclone.psyir.nodes.FileContainer`
     :param bool timed: place a caliper on each captured call whose site is in
         timed_region.CAPTURED_REGIONS.
+    :param bool coloured: colour a loop whose kernel writes a field two cells
+        share before capturing it, so that the region takes the coloured
+        answer to a shared write rather than the atomic one.
 
     :raises RuntimeError: if two call sites generate one symbol differently,
         if apply() leaves other than one new call, or if a timed build finds
@@ -289,6 +359,11 @@ def capture(psyir, timed=False):
                 transformation.validate(loop)
             except TransformationError:
                 continue
+            # After validate() and not before it: a colouring is only ever
+            # applied to a loop that is about to be captured, so a build
+            # never leaves a coloured Fortran loop behind.
+            if coloured and _shares_a_write(kernels[0]):
+                loop = _colour(loop, schedule, kernels[0])
             before = {id(call) for call in schedule.walk(Call)}
             try:
                 source = transformation.apply(loop)
