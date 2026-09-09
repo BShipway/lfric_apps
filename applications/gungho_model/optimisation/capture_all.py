@@ -78,13 +78,49 @@ its kernel writes a field two cells share. That is the alternative answer to
 a shared write: LFRicKokkosTrans generates a Kokkos::atomic_add for such an
 update by default, and takes a plain read-modify-write when the loop it is
 given is already coloured, because the cells of one colour meet at no dof.
-The two builds capture the same sites and differ only in what the region
-does with the update, which is what makes their checksums comparable.
 
-Only a loop the transformation has already accepted is coloured, so a
-colouring never changes a PSy layer this build then leaves as Fortran, and a
-colouring LFRicColourTrans refuses leaves the loop to the atomic arm rather
-than dropping the capture.
+WHAT THE COLOURED BUILD CAPTURES AND THE DEFAULT ONE DOES NOT
+
+An atomic answers a read-modify-write of one element and nothing else. A
+kernel that updates a shared field with a whole-array expression, or with a
+statement that is not one of the shapes ATOMIC_UPDATES names, is refused by
+LFRicKokkosTrans.validate on the atomic arm with 'Colour the loop instead' --
+twenty-one call sites of the model, in nine kernels. Colouring is the answer
+the refusal names: it puts the cells that meet at a dof in different launches,
+so no shape is required of the update at all and validate asks nothing about
+it. So this build asks the coloured question first for a loop whose kernel
+has a shared write: it colours a copy of the invoke schedule, validates the
+copy's coloured loop, and colours the real loop only when that answered yes.
+A loop the coloured arm refuses, and one LFRicColourTrans will not colour,
+falls back to the uncoloured validate and the atomic arm, so nothing the
+default build captures is lost.
+
+Ordering the two arms this way is why the two builds no longer capture the
+same sites: 'kokkos-all-coloured' captures those twenty-one and 'kokkos-all'
+does not.
+
+WHY 'kokkos-all' IS NOT CHANGED TO MATCH
+
+'kokkos-all' is the tree whose checksums are bit-identical to the Fortran
+reference, and it has to stay so: it is the control every other capture
+profile is measured against, and a control that moved when the capture grew
+would prove nothing about the growth. Colouring changes the order the
+contributions to a shared dof are summed, which is a floating-point
+difference and therefore a checksum difference; that is expected of a
+coloured build and would be a regression in the default one. So the default
+build keeps the atomic arm, keeps the sites it captured before, and refuses
+the twenty-one, and the coloured build is where the wider capture lives.
+
+THE INVARIANT: NO COLOURED FORTRAN IS LEFT BEHIND
+
+A loop this build does not capture must be left as the Fortran loop it was.
+Colouring only after a dry run on a copy is what keeps that true for a loop
+validate refuses: the real loop is never coloured unless the identical
+colouring has already been shown to validate. The one case that survives is
+a loop validate accepts and apply then fails on, which is recorded as
+'# unmodelled' and is the outcome this module already treats as a defect to
+be reported; _check_no_colouring_left asserts at the end of the capture that
+every coloured loop still standing is one of those and raises if it is not.
 
 TIMED BUILDS
 
@@ -112,6 +148,11 @@ from psyclone.transformations import LFRicColourTrans
 #: The accesses that make two cells of one launch update one dof. Read from
 #: the kernel's metadata, which is what LFRicKokkosTrans reads too.
 SHARED_ACCESSES = (AccessType.INC, AccessType.READINC)
+
+#: The loop type a colouring leaves the cells of one colour in. Read from the
+#: transformation rather than restated, so that the two cannot drift.
+# pylint: disable-next=protected-access
+COLOURED_LOOP_TYPE = LFRicKokkosTrans._COLOURED_LOOP_TYPE
 
 #: Where the generated translation units and the manifest fragments go, under
 #: WORKING_DIR. Named once here and in psy-ir-aidev's bin/capture-manifest and
@@ -276,35 +317,129 @@ def _shares_a_write(kernel):
                for argument in kernel.arguments.args)
 
 
-def _colour(loop, schedule, kernel):
+def _colour(loop):
     '''
-    Colours a loop and returns the inner loop, over the cells of one colour.
+    Colours a loop in place and returns the loop over the cells of one colour.
 
-    A colouring LFRicColourTrans refuses is not an error here. It leaves the
-    loop as it was, and LFRicKokkosTrans then generates the atomic update it
-    generates for every uncoloured loop, so the site is still captured.
+    The colouring replaces the loop with a loop over colours holding a loop
+    over that colour's cells, at the position the loop had. Finding the inner
+    loop by that position rather than by the identity of the kernel is what
+    lets the same helper colour a copy of a schedule, where no node is the
+    same object as the one it stands for.
 
     :param loop: the loop to colour.
     :type loop: :py:class:`psyclone.domain.lfric.LFRicLoop`
-    :param schedule: the invoke schedule holding it.
-    :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
-    :param kernel: the loop's kernel, which the colouring moves into the
-        inner loop and which is how that loop is found again.
-    :type kernel: :py:class:`psyclone.domain.lfric.LFRicKern`
 
-    :returns: the cells-in-colour loop, or the original loop if the
-        colouring was refused.
+    :returns: the cells-in-colour loop.
     :rtype: :py:class:`psyclone.domain.lfric.LFRicLoop`
 
+    :raises TransformationError: if LFRicColourTrans refuses the loop, which
+        the caller answers by leaving the loop uncoloured.
+    :raises RuntimeError: if the colouring did not leave exactly one loop over
+        the cells of a colour where the loop was.
+
     '''
+    parent, position = loop.parent, loop.position
+    LFRicColourTrans().apply(loop)
+    inner = [each for each in parent.children[position].walk(LFRicLoop)
+             if each.loop_type == COLOURED_LOOP_TYPE]
+    if len(inner) != 1:
+        raise RuntimeError(
+            f"colouring left {len(inner)} loops over the cells of a colour "
+            f"where one loop was, at position {position}")
+    return inner[0]
+
+
+def _refuses_coloured(loop, schedule):
+    '''
+    Whether the transformation would refuse this loop once it was coloured.
+
+    Asked before the loop itself is coloured, and answered by colouring a copy
+    of the PSy layer and validating the copy's coloured loop. That is
+    what keeps the module docstring's invariant: the real loop is coloured only
+    when the identical colouring has already been shown to validate, so a loop
+    the transformation refuses is left as the Fortran loop it was rather than
+    as a coloured one no region replaces.
+
+    The copy is of the whole PSy layer rather than of the invoke schedule
+    alone, and the loop is found again by its position, for the reason
+    LFRicKokkosTrans._rooted_copy gives about a kernel schedule: a schedule
+    copied on its own is detached from the FileContainer above it, and
+    LFRicKern.get_callees looks for a local implementation of the kernel in
+    that ancestor Container before it reads the kernel file. Validating a loop
+    inside a detached copy raises out of PSyclone rather than answering.
+
+    Colouring the copy calls colourmap_init on the invoke, which is not itself
+    copied. That reads the invoke's real schedule for kernels that are
+    coloured, and the loop this is asked about is not one, so a dry run adds
+    no colourmap symbols to a PSy layer that would then not use them.
+
+    :param loop: the uncoloured loop.
+    :type loop: :py:class:`psyclone.domain.lfric.LFRicLoop`
+    :param schedule: the invoke schedule holding it.
+    :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
+
+    :returns: the refusal, or None if the coloured loop would be captured.
+    :rtype: Optional[str]
+
+    '''
+    root = schedule.root
+    index = root.walk(LFRicLoop).index(loop)
     try:
-        LFRicColourTrans().apply(loop)
+        inner = _colour(root.copy().walk(LFRicLoop)[index])
     except TransformationError as err:
-        print(f"Kokkos: not coloured, {kernel.name.lower()}: {err}")
-        return loop
-    return [inner for inner in schedule.walk(LFRicLoop)
-            if inner.loop_type == 'cells_in_colour'
-            and any(each is kernel for each in inner.kernels())][0]
+        return f'LFRicColourTrans: {err}'
+    try:
+        LFRicKokkosTrans().validate(inner)
+    except TransformationError as err:
+        return str(err)
+    return None
+
+
+def _check_no_colouring_left(psyir, colours, captured, unmodelled):
+    '''
+    Assert the invariant: no loop this build left as Fortran was coloured.
+
+    A loop the transformation refuses is never coloured, because the colouring
+    is tried on a copy first, and a captured one has had its cells-in-colour
+    loop replaced by the launch call. So the only coloured loop that can still
+    be standing is one validate accepted and apply then failed on, which is
+    recorded as '# unmodelled' and reported as the defect it is. Anything else
+    is a colouring on a loop this build left as Fortran, which would make the
+    coloured tree's PSy layer differ from the default tree's at a site neither
+    of them captured.
+
+    Asked twice, of two different things. The bookkeeping asks which sites were
+    coloured and did not end as a capture or an unmodelled site; the walk asks
+    the generated tree whether a cells-in-colour loop is standing anywhere it
+    should not be. The first is immune to a coloured loop having been lowered
+    out of LFRicLoop by a sibling's capture and the second is immune to the
+    bookkeeping being wrong, and each is cheap.
+
+    :param psyir: the PSyIR of the PSy layer, after the capture.
+    :type psyir: :py:class:`psyclone.psyir.nodes.FileContainer`
+    :param set[tuple[str, str, str]] colours: the sites that were coloured.
+    :param set[tuple[str, str, str]] captured: the sites that were captured.
+    :param set[tuple[str, str, str]] unmodelled: the sites apply() failed on.
+
+    :raises RuntimeError: if a colouring is standing at any other site.
+
+    '''
+    left = {'/'.join(site) for site in colours - captured - unmodelled}
+    for schedule in psyir.walk(InvokeSchedule):
+        module = _module_name(schedule, psyir)
+        for loop in schedule.walk(LFRicLoop):
+            if loop.loop_type != COLOURED_LOOP_TYPE:
+                continue
+            for kernel in loop.kernels():
+                site = (module, schedule.name.lower(), kernel.name.lower())
+                if site not in unmodelled:
+                    left.add('/'.join(site))
+    if left:
+        raise RuntimeError(
+            "the coloured capture left a colouring behind at a site it did "
+            f"not capture: {', '.join(sorted(left))}. A loop this build does "
+            "not capture must be the Fortran loop it was.")
 
 
 def capture(psyir, timed=False, coloured=False):
@@ -322,10 +457,14 @@ def capture(psyir, timed=False, coloured=False):
         timed_region.CAPTURED_REGIONS.
     :param bool coloured: colour a loop whose kernel writes a field two cells
         share before capturing it, so that the region takes the coloured
-        answer to a shared write rather than the atomic one.
+        answer to a shared write rather than the atomic one. The colouring is
+        tried first and the atomic arm is the fallback, which is what makes a
+        coloured build capture the sites an atomic has no shape for; see the
+        module docstring.
 
     :raises RuntimeError: if two call sites generate one symbol differently,
-        if apply() leaves other than one new call, or if a timed build finds
+        if apply() leaves other than one new call, if a coloured build leaves
+        a colouring on a loop it did not capture, or if a timed build finds
         a CAPTURED_REGIONS site in this module that was not captured -- the
         timed builds must bracket the same work under the same names.
 
@@ -340,6 +479,8 @@ def capture(psyir, timed=False, coloured=False):
 
     rows_by_module = {}
     captured_sites = set()
+    coloured_sites = set()
+    unmodelled_sites = set()
     for schedule in psyir.walk(InvokeSchedule):
         module = _module_name(schedule, psyir)
         rows = rows_by_module.setdefault(module, [])
@@ -355,21 +496,34 @@ def capture(psyir, timed=False, coloured=False):
                 print(f"Kokkos: skipped {'/'.join(site)}: {SKIP[site]}")
                 continue
             transformation = LFRicKokkosTrans()
-            try:
-                transformation.validate(loop)
-            except TransformationError:
-                continue
-            # After validate() and not before it: a colouring is only ever
-            # applied to a loop that is about to be captured, so a build
-            # never leaves a coloured Fortran loop behind.
-            if coloured and _shares_a_write(kernels[0]):
-                loop = _colour(loop, schedule, kernels[0])
+            # The coloured arm is asked first for a loop with a shared write,
+            # because it is the arm that takes the updates no atomic answers.
+            # It is asked of a copy, and the loop itself is coloured only
+            # where the copy validated: a colouring is never left on a loop
+            # this build then leaves as Fortran.
+            take_colour = coloured and _shares_a_write(kernels[0])
+            if take_colour:
+                refusal = _refuses_coloured(loop, schedule)
+                if refusal is None:
+                    loop = _colour(loop)
+                    coloured_sites.add(site)
+                else:
+                    # Either arm may take it; the atomic one is asked next,
+                    # so nothing the default build captures is lost here.
+                    take_colour = False
+                    print(f"Kokkos: uncoloured {'/'.join(site)}: {refusal}")
+            if not take_colour:
+                try:
+                    transformation.validate(loop)
+                except TransformationError:
+                    continue
             before = {id(call) for call in schedule.walk(Call)}
             try:
                 source = transformation.apply(loop)
             except Exception as err:            # pylint: disable=broad-except
                 reason = f'{err.__class__.__name__}: {err}'
                 rows.append(('# unmodelled',) + site + (reason,))
+                unmodelled_sites.add(site)
                 print(f"Kokkos: UNMODELLED {'/'.join(site)}: {reason}")
                 continue
             symbol = _new_region_call(schedule, before)
@@ -377,6 +531,10 @@ def capture(psyir, timed=False, coloured=False):
             rows.append(site + (symbol, status))
             captured_sites.add(site)
             print(f"Kokkos: captured {symbol} at {'/'.join(site)} ({status})")
+
+    if coloured:
+        _check_no_colouring_left(psyir, coloured_sites, captured_sites,
+                                 unmodelled_sites)
 
     if timed:
         for module, invoke, kernel in timed_region.CAPTURED_REGIONS:
