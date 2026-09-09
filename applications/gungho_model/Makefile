@@ -94,7 +94,51 @@ ifeq ($(firstword $(subst -, ,$(PSYCLONE_TRANSFORMATION))),kokkos)
   # compile.mk passes CXXFLAGS but not the Fortran macro list, so the same
   # macro has to be named twice.
   build: export PRE_PROCESS_MACROS += USE_KOKKOS
-  build: export CXXFLAGS += -std=c++17 -fopenmp -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include
+  # KOKKOS_ACCEL names an accelerator variant of the image -- cuda90, cuda80 --
+  # and switches every generated .cpp from a host compile to a device one. The
+  # caller sets it, points OMPI_CXX at nvcc_wrapper, and nothing below has to
+  # know which card: the architecture is read out of the Kokkos install a few
+  # lines down. Unset, this file behaves exactly as it did.
+  #
+  # -fopenmp is the host compiler's flag and nvcc does not have it. Handed to
+  # nvcc bare it is 'Unknown option', so it travels through -Xcompiler on an
+  # accelerator build. Kokkos here is built with the OpenMP host backend as
+  # well as CUDA, so it is still needed.
+  KOKKOS_OPENMP_FLAG := -fopenmp
+  ifdef KOKKOS_ACCEL
+    KOKKOS_OPENMP_FLAG := -Xcompiler -fopenmp
+  endif
+  build: export CXXFLAGS += -std=c++17 $(KOKKOS_OPENMP_FLAG) -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include
+  ifdef KOKKOS_ACCEL
+    # The card is READ, not written. KokkosTargets.cmake records what a project
+    # compiling against this Kokkos must pass, so the cuda80 image gets sm_80
+    # without this file naming an image and an architecture cannot be misspelt
+    # here into a build that compiles, links and then fails at its first launch
+    # with 'no kernel image is available for execution on the device'.
+    #
+    # It cannot be left out: nvcc's own default is the toolkit's, sm_80 for
+    # CUDA 13, so a region built without this line is a cubin for the wrong
+    # card rather than no cubin at all -- a failure no compile-time error
+    # reports. tests/test_cuda_model_build.sh in psy-ir-aidev is the assertion.
+    KOKKOS_ARCH_FLAGS := $(shell grep -hoE -- '-arch=sm_[0-9]+' \
+        $(wildcard $(KOKKOS_ROOT)/lib*/cmake/Kokkos/KokkosTargets.cmake) \
+        2>/dev/null | sort -u)
+    ifeq ($(KOKKOS_ARCH_FLAGS),)
+      $(error KOKKOS_ACCEL=$(KOKKOS_ACCEL) but no -arch=sm_NN in $(KOKKOS_ROOT)/lib*/cmake/Kokkos/KokkosTargets.cmake: this Kokkos does not say which card it was built for, and a default written here would be a guess)
+    endif
+    # --expt-extended-lambda admits the __device__ lambda KOKKOS_LAMBDA expands
+    # to; --expt-relaxed-constexpr lets device code call the constexpr host
+    # functions Kokkos' own headers are full of. Neither is optional for a
+    # translation unit that instantiates a Kokkos::parallel_for.
+    build: export CXXFLAGS += $(KOKKOS_ARCH_FLAGS) --expt-extended-lambda --expt-relaxed-constexpr
+    # KOKKOS_FMAD=off turns off nvcc's fused multiply-add contraction, so that
+    # a device build's arithmetic can be compared with the host build's. It is
+    # nvcc's flag and is rejected by a host compiler, which is why it is inside
+    # this block and not beside the profile flags.
+    ifeq "$(KOKKOS_FMAD)" "off"
+      build: export CXXFLAGS += --fmad=false
+    endif
+  endif
   # The C++ optimisation level, matched to the Fortran side's for the same
   # profile. There is nothing to inherit: lfric_core's compiler tables define
   # flag groups for Fortran only, and compile.mk's .cpp rule passes CXXFLAGS
@@ -128,7 +172,26 @@ ifeq ($(firstword $(subst -, ,$(PSYCLONE_TRANSFORMATION))),kokkos)
   # covers the same three profiles and errors on anything else, so an
   # unrecognised PROFILE stops the build there rather than reaching a link.
   # A second copy of that error would only be a second thing to keep in step.
-  ifeq "$(PROFILE)" "full-debug"
+  #
+  # nvcc takes a NUMBER after -O and nothing else: -Og is 'nvcc fatal : "g":
+  # expected a number' and -Ofast the same, before a single line of the region
+  # is read. So an accelerator build maps the three profiles onto the levels
+  # nvcc has. -Og becomes -O2 rather than -O1 because the Fortran side's
+  # SAFE_OPTIMISATION is -Og, whose point is optimised-but-debuggable, and -O2
+  # is the nearest nvcc offers; -Ofast becomes -O3 WITHOUT -ffast-math, which
+  # nvcc would apply to the host pass only. The device-side counterpart of
+  # fast-math is fused multiply-add contraction, which nvcc does by default and
+  # KOKKOS_FMAD=off above turns off -- so the numerics knob for device code is
+  # that one, not this.
+  ifdef KOKKOS_ACCEL
+    ifeq "$(PROFILE)" "full-debug"
+      build: export CXXFLAGS += -O0 -g
+    else ifeq "$(PROFILE)" "fast-debug"
+      build: export CXXFLAGS += -O2 -g
+    else ifeq "$(PROFILE)" "production"
+      build: export CXXFLAGS += -O3 -g
+    endif
+  else ifeq "$(PROFILE)" "full-debug"
     build: export CXXFLAGS += -O0 -g
   else ifeq "$(PROFILE)" "fast-debug"
     build: export CXXFLAGS += -Og -g
@@ -136,6 +199,46 @@ ifeq ($(firstword $(subst -, ,$(PSYCLONE_TRANSFORMATION))),kokkos)
     build: export CXXFLAGS += -Ofast -g
   endif
   build: export LDFLAGS += -L$(KOKKOS_ROOT)/lib -Wl,-rpath=$(KOKKOS_ROOT)/lib
+  ifdef KOKKOS_ACCEL
+    # THE CUDA RUNTIME HAS TO BE ON THE LINK LINE, and it is not enough that
+    # libkokkoscore.so already needs it. An nvcc-compiled translation unit calls
+    # cudaMemcpyToSymbol and friends ITSELF -- that is how a __device__ variable
+    # in a region is initialised -- and ld's default
+    # --no-copy-dt-needed-entries refuses to satisfy a reference from an object
+    # out of a library that is only reachable through another library's NEEDED:
+    #
+    #   ld: lib/libgungho_model.a(smooth_orog_kokkos.o): undefined reference to
+    #       symbol 'cudaMemcpyToSymbol@@libcudart.so.13'
+    #   ld: /opt/view/lib64/libcudart.so.13: DSO missing from command line
+    #
+    # The Fortran executable is linked by mpif90, which knows nothing of CUDA,
+    # so the toolkit's library directory is found the way the extracted-region
+    # harness finds it: from nvcc's own position, not from a path written here.
+    KOKKOS_CUDA_LIB := $(shell cd "$$(dirname "$$(command -v nvcc)")/../lib64" 2>/dev/null && pwd)
+    ifeq ($(KOKKOS_CUDA_LIB),)
+      $(error KOKKOS_ACCEL=$(KOKKOS_ACCEL) but no nvcc on PATH, so the CUDA runtime cannot be named on the link line)
+    endif
+    build: export LDFLAGS += -L$(KOKKOS_CUDA_LIB) -Wl,-rpath=$(KOKKOS_CUDA_LIB)
+    build: export EXTERNAL_DYNAMIC_LIBRARIES += cudart
+    # AND THE DRIVER LIBRARY, from the toolkit's STUB, which is linked against
+    # and deliberately NOT put on an rpath. libkokkoscore.so needs libcuda.so.1
+    # -- cuStreamGetCtx, cuCtxPushCurrent_v2, cuCtxGetDevice -- and that library
+    # comes from a driver installation, not from a toolkit, so it is absent on
+    # a host with no card and the executable cannot be linked there at all:
+    #
+    #   ld: libkokkoscore.so: undefined reference to `cuStreamGetCtx'
+    #
+    # The toolkit ships a stub carrying the same soname and no implementation,
+    # which is exactly what the linker needs and nothing more. At run time the
+    # loader takes libcuda.so.1 from the real driver that `apptainer --nv` binds
+    # in on a GPU node. On the rpath instead, the stub would satisfy the loader
+    # too, and the model would run against a library whose every entry point
+    # returns an error.
+    ifneq ($(wildcard $(KOKKOS_CUDA_LIB)/stubs),)
+      build: export LDFLAGS += -L$(KOKKOS_CUDA_LIB)/stubs
+      build: export EXTERNAL_DYNAMIC_LIBRARIES += cuda
+    endif
+  endif
   # libxios.a is built against the pre-C++11 libstdc++ string ABI; Kokkos is
   # built against the current one. The two disagree about the layout of
   # std::string, and so about any class holding one -- but the mangled names of
