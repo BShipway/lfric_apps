@@ -11,11 +11,24 @@ LFRicKokkosTrans accepts as a Kokkos region, colouring first where a write is
 shared.
 
 This is 'kokkos-all' plus one flag: capture(psyir, coloured=True) applies
-LFRicColourTrans to a loop whose kernel increments a field before capturing
-it, so that the generated region takes the coloured answer to a write two
-cells share rather than the atomic one. Cells of one colour meet at no dof,
-so the update is a plain read-modify-write and the caller enters the region
-once per colour.
+LFRicColourTrans to a loop whose kernel writes a field two cells share before
+capturing it, so that the generated region takes the coloured answer to that
+write rather than the atomic one. Cells of one colour meet at no dof, so the
+write is a plain statement and the caller enters the region once per colour.
+
+WHICH WRITES THOSE ARE
+
+The ones LFRicKokkosTrans itself calls shared, which capture_all asks it for
+rather than restating: a field accumulated into with gh_inc or gh_readinc,
+where two cells add to one dof, and a field stored to with gh_write on a
+space LFRic does not call discontinuous, where two cells each store one.
+Until task D4.1 this tree offered the colouring to the accumulations only.
+The stores were captured here as they are in 'kokkos-all', with
+Kokkos::atomic_store -- 18 regions at 27 call sites -- so at those regions
+the comparison this tree exists to make would have been atomics against
+atomics. It now takes the coloured answer to a store as it does to an
+accumulation, which is what leaves the two trees differing in the one thing
+they are compared on.
 
 WHAT THIS TREE CAPTURES THAT 'kokkos-all' DOES NOT
 
@@ -36,7 +49,13 @@ bit-identical to the Fortran reference and it is the control every other
 profile is measured against, so a capture that widened it would move the
 control and the comparison with it. Colouring changes the order the
 contributions to a shared dof are summed, which is a floating-point
-difference: expected here, and a regression there.
+difference: expected here, and a regression there. Colouring a store moves
+no arithmetic at all -- LFRic's own rules permit gh_write on a continuous
+space because the kernel's author promises every cell reaching a shared dof
+stores the same value -- so this tree's answer moves only where an
+accumulation was recoloured. D4.1 recoloured none: taking the coloured answer
+at all 27 store sites leaves the three checksums of the coloured reference
+unchanged, at one thread and at four.
 
 Both answers are correct, so this tree exists to be compared: what
 'kokkos-all' and 'kokkos-all-coloured' both capture they must capture to the
