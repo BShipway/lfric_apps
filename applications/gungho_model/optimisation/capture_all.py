@@ -75,17 +75,31 @@ COLOURED BUILDS
 
 capture(psyir, coloured=True) colours a loop before capturing it, whenever
 its kernel writes a field two cells share. That is the alternative answer to
-a shared write: LFRicKokkosTrans generates a Kokkos::atomic_add for such an
-update by default, and takes a plain read-modify-write when the loop it is
-given is already coloured, because the cells of one colour meet at no dof.
+a shared write: LFRicKokkosTrans generates a Kokkos::atomic_* for such a
+write by default, and takes a plain statement when the loop it is given is
+already coloured, because the cells of one colour meet at no dof.
+
+WHICH LOOPS ARE OFFERED THE COLOURING
+
+Every loop whose kernel LFRicKokkosTrans._shared_arguments answers for, which
+is the transformation's own definition of a write two cells may make to one
+dof and is asked of it rather than restated here. Two things put an argument
+in that answer: an access of gh_inc or gh_readinc, under which the cells add
+to a dof, and a written field on a space this library does not call
+discontinuous, under which the cells each store one. The second half arrived
+with task D4, which stopped refusing a continuous gh_write and gave it
+Kokkos::atomic_store; until task D4.1 this module asked only about the first,
+so those stores reached the coloured build as atomics -- 18 regions of them,
+at 27 call sites -- and the device comparison the coloured build exists for
+would have compared atomics with atomics at every one.
 
 WHAT THE COLOURED BUILD CAPTURES AND THE DEFAULT ONE DOES NOT
 
-An atomic answers a read-modify-write of one element and nothing else. A
-kernel that updates a shared field with a whole-array expression, or with a
+An atomic update answers a read-modify-write of one element and nothing else.
+A kernel that updates a shared field with a whole-array expression, or with a
 statement that is not one of the shapes ATOMIC_UPDATES names, is refused by
 LFRicKokkosTrans.validate on the atomic arm with 'Colour the loop instead' --
-twenty-one call sites of the model, in nine kernels. Colouring is the answer
+twenty-four call sites of the model, in nine kernels. Colouring is the answer
 the refusal names: it puts the cells that meet at a dof in different launches,
 so no shape is required of the update at all and validate asks nothing about
 it. So this build asks the coloured question first for a loop whose kernel
@@ -96,8 +110,10 @@ falls back to the uncoloured validate and the atomic arm, so nothing the
 default build captures is lost.
 
 Ordering the two arms this way is why the two builds no longer capture the
-same sites: 'kokkos-all-coloured' captures those twenty-one and 'kokkos-all'
-does not.
+same sites: 'kokkos-all-coloured' captures those twenty-four and 'kokkos-all'
+does not. The continuous stores are a second and different difference: both
+builds capture them, and only the coloured build captures them without an
+atomic.
 
 WHY 'kokkos-all' IS NOT CHANGED TO MATCH
 
@@ -109,7 +125,16 @@ contributions to a shared dof are summed, which is a floating-point
 difference and therefore a checksum difference; that is expected of a
 coloured build and would be a regression in the default one. So the default
 build keeps the atomic arm, keeps the sites it captured before, and refuses
-the twenty-one, and the coloured build is where the wider capture lives.
+the twenty-four, and the coloured build is where the wider capture lives.
+
+Colouring a store is the one case that moves no arithmetic. A gh_write to a
+continuous space is legal LFRic because its author promises that every cell
+reaching a shared dof stores the same value there, so the order the stores
+happen in cannot change what the dof ends up holding. Neither this module nor
+the transformation relies on that promise -- the default build still emits
+Kokkos::atomic_store for every one of them -- but it is why the coloured
+build's checksums are expected to move only where an accumulation was
+recoloured.
 
 THE INVARIANT: NO COLOURED FORTRAN IS LEFT BEHIND
 
@@ -136,7 +161,6 @@ comparison against the other timed builds.
 import os
 from pathlib import Path
 
-from psyclone.core import AccessType
 from psyclone.domain.lfric import LFRicLoop
 from psyclone.domain.lfric.lfric_builtins import LFRicBuiltIn
 from psyclone.domain.lfric.transformations import LFRicKokkosTrans
@@ -144,10 +168,6 @@ from psyclone.psyGen import InvokeSchedule
 from psyclone.psyir.nodes import Call, Container
 from psyclone.psyir.transformations import TransformationError
 from psyclone.transformations import LFRicColourTrans
-
-#: The accesses that make two cells of one launch update one dof. Read from
-#: the kernel's metadata, which is what LFRicKokkosTrans reads too.
-SHARED_ACCESSES = (AccessType.INC, AccessType.READINC)
 
 #: The loop type a colouring leaves the cells of one colour in. Read from the
 #: transformation rather than restated, so that the two cannot drift.
@@ -304,17 +324,35 @@ def _write_manifest(regions, module, rows):
 
 def _shares_a_write(kernel):
     '''
-    Whether two cells of one launch would update the same dof.
+    Whether two cells of one launch would write the same dof.
+
+    The question is asked of the transformation rather than restated here,
+    the way COLOURED_LOOP_TYPE is read from it and the way psy-ir-aidev's
+    survey runs its rules: the coloured arm has to be offered to exactly the
+    kernels LFRicKokkosTrans calls shared, or the build colours a kernel that
+    needs no colouring and -- the failure this call site was written for --
+    leaves an atomic on one that does.
+
+    Two different things make a write shared and they are read from different
+    places. An access of gh_inc or gh_readinc says that cells add to one dof;
+    the function space of a written field says that cells each store one.
+    This asked only the first until task D4.1, so the coloured build gave
+    every continuous gh_write a Kokkos::atomic_store -- which is the answer
+    the coloured build exists to be compared against.
 
     :param kernel: the coded kernel the loop calls.
     :type kernel: :py:class:`psyclone.domain.lfric.LFRicKern`
 
-    :returns: whether any argument is incremented rather than written.
+    :returns: whether any argument is written by more than one cell of a
+        launch, whether by accumulating into it or by storing to it.
     :rtype: bool
 
     '''
-    return any(argument.access in SHARED_ACCESSES
-               for argument in kernel.arguments.args)
+    # LFRicKokkosTrans._shared_arguments is the transformation's own answer
+    # to this question and there is no public statement of it. The survey
+    # reads _validate_shared_updates the same way and for the same reason.
+    # pylint: disable-next=protected-access
+    return bool(LFRicKokkosTrans._shared_arguments(kernel))
 
 
 def _colour(loop):
