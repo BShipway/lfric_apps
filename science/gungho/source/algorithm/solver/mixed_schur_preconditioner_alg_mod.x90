@@ -146,6 +146,9 @@ module mixed_schur_preconditioner_alg_mod
         pressure_solver
 
      contains
+     !> Initialise an already-allocated object in place
+     procedure, public :: initialise => mixed_schur_preconditioner_initialise
+
      ! Override the (abstract interface) for application of
      ! a preconditioner \f$y = P.x\f$
      procedure, public :: apply => apply_mixed_schur_preconditioner
@@ -189,10 +192,6 @@ contains
                                                   pressure_solver)       &
                                                   result(self)
 
-    use function_space_mod,            only: function_space_type
-    use function_space_collection_mod, only: function_space_collection
-    use fs_continuity_mod,             only: W2
-
     implicit none
 
     integer(i_def),                                intent(in) :: element_order_h
@@ -201,6 +200,41 @@ contains
     class(abstract_iterative_solver_type), target, intent(in) :: pressure_solver
 
     type(mixed_schur_preconditioner_type)  :: self
+
+    call self%initialise( mesh, element_order_h, element_order_v, &
+                          pressure_solver )
+
+  end function mixed_schur_preconditioner_constructor
+
+  !> @brief Initialise a <code>mixed_schur_preconditioner_type</code> in place.
+  !>
+  !> @details Does what the structure constructor does, but on an object that
+  !!          already exists, so that a caller may allocate the object and
+  !!          initialise it without a constructor temporary being copied and
+  !!          then finalised. The constructor delegates here, so the two
+  !!          cannot drift apart.
+  !>
+  !> @param [in,out] self       The preconditioner being initialised
+  !> @param [in] mesh            Mesh to create function spaces on
+  !> @param [in] element_order_h Horizontal element order for function spaces
+  !> @param [in] element_order_v Vertical element order for function spaces
+  !> @param [in] pressure_solver Solver object for Helmholtz system
+  subroutine mixed_schur_preconditioner_initialise(self, mesh,            &
+                                                   element_order_h,       &
+                                                   element_order_v,       &
+                                                   pressure_solver)
+
+    use function_space_mod,            only: function_space_type
+    use function_space_collection_mod, only: function_space_collection
+    use fs_continuity_mod,             only: W2
+
+    implicit none
+
+    class(mixed_schur_preconditioner_type),        intent(inout) :: self
+    integer(i_def),                                intent(in) :: element_order_h
+    integer(i_def),                                intent(in) :: element_order_v
+    type(mesh_type),                       target, intent(in) :: mesh
+    class(abstract_iterative_solver_type), target, intent(in) :: pressure_solver
 
     type(mesh_type),           pointer :: mesh_ptr
     type(function_space_type), pointer :: fs
@@ -228,7 +262,7 @@ contains
 
     call log_event( 'done', LOG_LEVEL_DEBUG )
 
-  end function mixed_schur_preconditioner_constructor
+  end subroutine mixed_schur_preconditioner_initialise
 
   !> @brief Apply the preconditioner to calculate \f$y = P.x\f$ for the mixed
   !!        system in velocity, pressure, density and potential temperature.

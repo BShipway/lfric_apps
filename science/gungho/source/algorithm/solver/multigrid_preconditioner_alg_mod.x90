@@ -71,6 +71,8 @@ module multigrid_preconditioner_alg_mod
     !> Helmholtz operator and precondition for tridiagonal solve on each multigrid level
     type(linear_operators_type), allocatable, dimension(:) :: linear_operators
   contains
+    !> Initialise an already-allocated object in place
+    procedure, public  :: initialise => multigrid_preconditioner_initialise
     !> Construct fields on all multigrid levels
     procedure, private :: construct_multigrid_fields
     !> Multigrid V-cycle
@@ -102,16 +104,41 @@ contains
   function multigrid_preconditioner_constructor(p_fs, &
                                                 H_op, &
                                                 Hz_prec) result(self)
+    implicit none
+    type(function_space_type), intent(in) :: p_fs
+    class(abstract_hierarchical_linear_operator_type) :: H_op
+    class(abstract_hierarchical_preconditioner_type) :: Hz_prec
+    type(multigrid_preconditioner_type) :: self
+
+    call self%initialise(p_fs, H_op, Hz_prec)
+
+  end function multigrid_preconditioner_constructor
+
+  !> @brief Initialise a multigrid preconditioner in place.
+  !>
+  !> @details Does what the structure constructor does, but on an object that
+  !!          already exists, so that a caller may allocate the object and
+  !!          initialise it without a constructor temporary being copied and
+  !!          then finalised. The constructor delegates here, so the two
+  !!          cannot drift apart.
+  !>
+  !> @param[in,out] self    The preconditioner being initialised
+  !> @param[in] p_fs Function space of the pressure field
+  !> @param[in] H_op Pressure operator on finest level
+  !> @param[in] Hz_prec Pressure preconditioner on finest level
+  subroutine multigrid_preconditioner_initialise(self, p_fs, &
+                                                 H_op, &
+                                                 Hz_prec)
     use multigrid_config_mod, only : smooth_relaxation, &
                                      n_presmooth,       &
                                      n_postsmooth,      &
                                      n_coarsesmooth,    &
                                      multigrid_chain_nitems
     implicit none
+    class(multigrid_preconditioner_type), intent(inout) :: self
     type(function_space_type), intent(in) :: p_fs
     class(abstract_hierarchical_linear_operator_type) :: H_op
     class(abstract_hierarchical_preconditioner_type) :: Hz_prec
-    type(multigrid_preconditioner_type) :: self
 
     self%rho_smooth     = real(smooth_relaxation, r_solver)
     self%n_presmooth    = n_presmooth
@@ -127,7 +154,7 @@ contains
     ! Construct fields and operators on all multigrid levels
     call self%construct_multigrid_fields(p_fs, H_op, Hz_prec)
 
-  end function multigrid_preconditioner_constructor
+  end subroutine multigrid_preconditioner_initialise
 
   !> @brief Construct fields, operators and preconditioners on all multigrid levels.
   !>

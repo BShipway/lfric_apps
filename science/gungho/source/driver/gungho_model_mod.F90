@@ -1177,7 +1177,11 @@ contains
     select case( method )
       case( method_semi_implicit )  ! Semi-Implicit
         ! Initialise the semi-implicit timestep method
-        allocate( timestep_method, source=semi_implicit_timestep_type(modeldb) )
+        allocate( semi_implicit_timestep_type :: timestep_method )
+        select type( timestep_method )
+        type is ( semi_implicit_timestep_type )
+          call timestep_method%initialise( modeldb )
+        end select
         ! Add to the model database
         call modeldb%values%add_key_value('timestep_method', &
                         timestep_method)
@@ -1193,7 +1197,11 @@ contains
 
       case( method_rk )             ! RK
         ! Initialise the Runge-Kutta timestep method
-        allocate( timestep_method, source=rk_timestep_type(modeldb) )
+        allocate( rk_timestep_type :: timestep_method )
+        select type( timestep_method )
+        type is ( rk_timestep_type )
+          call timestep_method%initialise( modeldb )
+        end select
         ! Add to the model database
         call modeldb%values%add_key_value('timestep_method', &
                         timestep_method)
