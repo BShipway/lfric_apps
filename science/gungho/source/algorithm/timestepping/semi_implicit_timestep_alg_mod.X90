@@ -193,6 +193,7 @@ module semi_implicit_timestep_alg_mod
   contains
     private
 
+    procedure, public  :: initialise => semi_implicit_alg_initialise
     procedure, public  :: step     => semi_implicit_alg_step
     procedure, public  :: finalise => semi_implicit_alg_final
     procedure, nopass  :: run_init
@@ -214,6 +215,25 @@ contains
     implicit none
 
     type(semi_implicit_timestep_type) :: self
+
+    type(modeldb_type),           intent(in), target  :: modeldb
+
+    call self%initialise( modeldb )
+
+  end function semi_implicit_alg_init
+
+  !> @brief Initialises an existing timestep object in place
+  !> @details Does what the structure constructor does, but on an object that
+  !!          already exists, so that a caller may allocate the object and
+  !!          initialise it without a constructor temporary being copied and
+  !!          then finalised. The constructor delegates here, so the two
+  !!          cannot drift apart.
+  !> @param[in,out] self The timestep object being initialised
+  !> @param[in] modeldb Holds the model state
+  subroutine semi_implicit_alg_initialise(self, modeldb)
+    implicit none
+
+    class(semi_implicit_timestep_type), intent(inout) :: self
 
     type(modeldb_type),           intent(in), target  :: modeldb
 
@@ -252,7 +272,7 @@ contains
     nullify ( prognostic_fields, moisture_fields, mr_array, model_clock, &
               u, rho, theta, exner, mr )
 
-  end function semi_implicit_alg_init
+  end subroutine semi_implicit_alg_initialise
 
   !> Extracts data from input objects to prepare for running timestep
   !> @param[in] modeldb The gungho model data object
@@ -439,7 +459,7 @@ contains
 
     implicit none
 
-    type(semi_implicit_timestep_type), intent(inout) :: self
+    class(semi_implicit_timestep_type), intent(inout) :: self
 
     type(config_type), intent(in), target :: config
 

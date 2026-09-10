@@ -140,10 +140,14 @@ contains
                 source = pressure_preconditioner_type(level=1_i_def) )
     case(PRECONDITIONER_MULTIGRID)
       Hz_preconditioner = pressure_preconditioner_type(level=1_i_def)
-      allocate( pressure_preconditioner_out, &
-                source = multigrid_preconditioner_type( state(igh_p)%get_function_space(), &
-                                                        pressure_operator_out,             &
-                                                        Hz_preconditioner ) )
+      allocate( multigrid_preconditioner_type :: pressure_preconditioner_out )
+      select type( pressure_preconditioner_out )
+      type is ( multigrid_preconditioner_type )
+        call pressure_preconditioner_out%initialise(                    &
+                 state(igh_p)%get_function_space(),                     &
+                 pressure_operator_out,                                 &
+                 Hz_preconditioner )
+      end select
     case default
       call log_event( "Unknown pressure preconditioner specified", LOG_LEVEL_ERROR)
     end select
@@ -293,12 +297,15 @@ contains
     ! Allocate mixed preconditioner of correct type
     select case(si_preconditioner)
     case(SI_PRECONDITIONER_PRESSURE)
-      allocate( mixed_preconditioner_out,                 &
-                source = mixed_schur_preconditioner_type( &
-                  state(igh_u)%get_mesh(),                &
-                  state(igh_u)%get_element_order_h(),     &
-                  state(igh_u)%get_element_order_v(),     &
-                  pressure_solver_in ) )
+      allocate( mixed_schur_preconditioner_type :: mixed_preconditioner_out )
+      select type( mixed_preconditioner_out )
+      type is ( mixed_schur_preconditioner_type )
+        call mixed_preconditioner_out%initialise(     &
+                  state(igh_u)%get_mesh(),            &
+                  state(igh_u)%get_element_order_h(), &
+                  state(igh_u)%get_element_order_v(), &
+                  pressure_solver_in )
+      end select
 
     case(SI_PRECONDITIONER_NONE)
       allocate( mixed_preconditioner_out, &
