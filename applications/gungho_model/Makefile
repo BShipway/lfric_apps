@@ -108,7 +108,12 @@ ifeq ($(firstword $(subst -, ,$(PSYCLONE_TRANSFORMATION))),kokkos)
   ifdef KOKKOS_ACCEL
     KOKKOS_OPENMP_FLAG := -Xcompiler -fopenmp
   endif
-  build: export CXXFLAGS += -std=c++17 $(KOKKOS_OPENMP_FLAG) -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include
+  # -I$(WORKING_DIR) is for "lfric_kokkos_staging.hpp", the header every
+  # generated region includes to obtain its Views. A capture writes it beside
+  # the regions it generates; the build driver writes it into the working
+  # directory as well, so that a region written anywhere under the tree finds
+  # one copy of it.
+  build: export CXXFLAGS += -std=c++17 $(KOKKOS_OPENMP_FLAG) -DUSE_KOKKOS -I$(KOKKOS_ROOT)/include -I$(WORKING_DIR)
   ifdef KOKKOS_ACCEL
     # The card is READ, not written. KokkosTargets.cmake records what a project
     # compiling against this Kokkos must pass, so the cuda80 image gets sm_80
