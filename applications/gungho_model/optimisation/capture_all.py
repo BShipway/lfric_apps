@@ -165,6 +165,7 @@ from psyclone.domain.lfric import LFRicLoop
 from psyclone.domain.lfric.lfric_builtins import LFRicBuiltIn
 from psyclone.domain.lfric.transformations import LFRicKokkosTrans
 from psyclone.psyGen import InvokeSchedule
+from psyclone.psyir.backend.kokkos_staging import HEADER_NAME, header_text
 from psyclone.psyir.nodes import Call, Container
 from psyclone.psyir.transformations import TransformationError
 from psyclone.transformations import LFRicColourTrans
@@ -277,6 +278,36 @@ def _write_region(regions, symbol, source, site):
     temporary.write_text(source, encoding='utf-8')
     os.replace(temporary, path)
     return 'written'
+
+
+def _write_staging_header(regions):
+    '''
+    Writes the staging header the generated regions include.
+
+    Every region PSyclone generates now obtains its Views through
+    lfric_kokkos::stage(), declared in lfric_kokkos_staging.hpp, so the header
+    has to sit beside them: compile.mk collects the .cpp files under
+    WORKING_DIR and compiles each in its own directory, which is where the
+    quoted include looks first.
+
+    The text comes from PSyclone rather than from a copy kept here, for the
+    same reason COLOURED_LOOP_TYPE is read from the transformation: a header
+    that drifted from the regions generated against it would be a mismatch no
+    build reports. Written the same way a region is -- a temporary and a
+    rename -- because make runs PSyclone once per algorithm, in parallel, and
+    every one of them writes this.
+
+    :param regions: the kokkos_regions directory.
+    :type regions: :py:class:`pathlib.Path`
+
+    '''
+    path = regions / HEADER_NAME
+    source = header_text()
+    if path.exists() and path.read_text(encoding='utf-8') == source:
+        return
+    temporary = regions / f'.{HEADER_NAME}.{os.getpid()}.tmp'
+    temporary.write_text(source, encoding='utf-8')
+    os.replace(temporary, path)
 
 
 def _new_region_call(schedule, before):
@@ -514,6 +545,10 @@ def capture(psyir, timed=False, coloured=False):
 
     regions = working_dir() / REGIONS_DIR
     regions.mkdir(parents=True, exist_ok=True)
+    # Before any region is written, so that a build interrupted between the
+    # two leaves a region with no header rather than a header with no region:
+    # the first does not compile and is seen, the second compiles and is not.
+    _write_staging_header(regions)
 
     rows_by_module = {}
     captured_sites = set()
