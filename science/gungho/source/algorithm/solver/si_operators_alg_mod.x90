@@ -348,6 +348,10 @@ contains
       deallocate(eliminated_q32)
     end if
 
+    ! A saved module variable is not finalised at program end, so the shared
+    ! block behind its stencil has to be given back here.
+    call eliminated_q2t%operator_final()
+
   end subroutine final_si_operators
 
   !> @brief Subroutine to compute the si operators
