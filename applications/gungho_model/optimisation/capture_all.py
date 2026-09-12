@@ -69,7 +69,23 @@ for one purpose: when a whole-model build's checksums move, the divergence is
 bisected by skipping the newly captured sites in groups and regenerating the
 PSy layer, which is minutes rather than the hours a model rebuild takes. An
 entry with no reason is refused at import, so nothing can be skipped quietly,
-and the phase-5 exit criterion requires this table to be empty.
+and the phase-5 exit criterion required this table to be empty.
+
+Phase 6 put two entries in it, and they are not a bisection left behind. The
+two pointwise_convert_xyz2llr sites in lfric_xios_setup_mod convert the nodal
+coordinates of a function space to longitude and latitude, once, while the
+I/O context is set up, and hand them to XIOS as a domain's lonvalue and
+latvalue. XIOS then matches those against the domain's cell bounds, which
+lfric_xios_setup_mod computes on the host through the same Fortran xyz2llr,
+by hashing the coordinates. A kernel run on a GPU computes atan with the
+device's libm, which differs from glibc's in the last bit for some arguments,
+and the hashes of one bit apart do not match: the first whole-model runs on
+an H100 (psy-ir-aidev, validation/device/README.md, 2026-09-11 and -12)
+segfaulted inside xios::CMesh::createMeshEpsilon on the first write, and ran
+ten timesteps to a checksum within acceptance with these two sites skipped.
+The consumer requires the producer's bits to equal the host's, which no
+device transcendental can promise, so the two sites stay in Fortran. They
+run once and take no measurable time.
 
 COLOURED BUILDS
 
@@ -183,6 +199,16 @@ REGIONS_DIR = 'kokkos_regions'
 #: Sites that are not captured, as (psy module, invoke, kernel) -> reason. All
 #: three names lower-case. Empty is the intended state; see the docstring.
 SKIP = {
+    ('lfric_xios_setup_mod_psy', 'invoke_2_pointwise_convert_xyz2llr_kernel_type',
+     'pointwise_convert_xyz2llr_code'):
+        'XIOS hashes these longitudes and latitudes against bounds the host '
+        'computes with glibc atan; a device atan one bit apart does not '
+        'match (phase 6, H4)',
+    ('lfric_xios_setup_mod_psy', 'invoke_4_pointwise_convert_xyz2llr_kernel_type',
+     'pointwise_convert_xyz2llr_code'):
+        'XIOS hashes these longitudes and latitudes against bounds the host '
+        'computes with glibc atan; a device atan one bit apart does not '
+        'match (phase 6, H4)',
 }
 
 
