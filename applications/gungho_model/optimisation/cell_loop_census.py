@@ -416,6 +416,129 @@ def census_cell_loops(psyir):
             profile_trans.apply(loop, options=options)
 
 
+#: The two region names of the capture census: every cell loop the whole-model
+#: capture takes goes under the first, every one it leaves under the second,
+#: so timer.txt holds two rows whose sum is the cell-loop total and whose ratio
+#: is the TIME-weighted coverage -- the number entry-weighted coverage cannot
+#: give. Phase 7 (2026-09-12) found the device model spending three quarters
+#: of a Fortran step in the host's uncaptured work while 94% of executed loop
+#: entries were captured; the 320-entry FFSL residue is the model's heaviest
+#: arithmetic. Two names fit the 300-row timer table where 645 did not.
+CAPTURED_REGION = 'captured'
+RESIDUE_REGION = 'residue'
+
+
+def read_capture_manifest(path):
+    '''
+    Reads the sites a whole-model capture took, as bin/capture-manifest lists
+    them: one row per call site, ``psy module<TAB>invoke<TAB>kernel<TAB>...``,
+    lower-cased here. Lines starting with ``#`` are comments.
+
+    :param path: the manifest file.
+    :type path: str or :py:class:`pathlib.Path`
+
+    :returns: the (module, invoke, kernel) triples.
+    :rtype: set[tuple[str, str, str]]
+
+    :raises RuntimeError: if the file holds no site, which means it is not a
+        manifest and a census read against it would call every loop residue.
+
+    '''
+    sites = set()
+    with open(path, encoding='utf-8') as handle:
+        for line in handle:
+            if not line.strip() or line.startswith('#'):
+                continue
+            fields = line.rstrip('\n').split('\t')
+            if len(fields) < 3:
+                raise RuntimeError(
+                    f"{path}: a manifest row needs module, invoke and kernel, "
+                    f"got {line.rstrip()!r}")
+            sites.add(tuple(field.lower() for field in fields[:3]))
+    if not sites:
+        raise RuntimeError(f"{path} names no captured site")
+    return sites
+
+
+def _cell_kernel_loops(schedule):
+    '''
+    Every outermost coded-kernel loop over cell columns in a schedule, the
+    captured ones included -- the capture census partitions all of them.
+
+    :param schedule: the invoke schedule to search.
+    :type schedule: :py:class:`psyclone.psyGen.InvokeSchedule`
+
+    :returns: the loops, outermost first in schedule order.
+    :rtype: list[:py:class:`psyclone.psyir.nodes.Loop`]
+
+    '''
+    spaces = cell_iteration_spaces()
+    return [loop for loop in schedule.loops()
+            if loop.loop_type not in INNER_COLOUR_LOOPS
+            and loop.coded_kernels()
+            and loop.iteration_space in spaces]
+
+
+def census_by_capture(psyir, manifest, residue_per_kernel=False):
+    '''
+    Places ``region:captured`` on every cell loop the manifest names and
+    ``region:residue`` on every other cell loop -- or, with
+    ``residue_per_kernel``, ``region:residue:<kernel>`` so that the residue
+    is ranked kernel by kernel. The residue holds some 170 loops over about
+    a hundred distinct kernels, which fits timer_mod's 300 rows where one
+    name per cell loop (645) did not.
+
+    A loop is named by (psy module, invoke, kernel) of its first coded kernel,
+    which is how capture_all.py's fragments and bin/capture-manifest name a
+    call site. Called from the global script of the ``residue-census``
+    transformation, on a Fortran build: the calipers time the loops as
+    LFRic runs them, so the two rows say what the capture would take from a
+    Fortran step and what it would leave.
+
+    :param psyir: the PSyIR of the PSy-layer.
+    :type psyir: :py:class:`psyclone.psyir.nodes.FileContainer`
+    :param manifest: the captured sites, as read_capture_manifest returns.
+    :type manifest: set[tuple[str, str, str]]
+    :param bool residue_per_kernel: name each residue caliper after its
+        kernel, ``residue:<kernel>``, instead of the shared ``residue``.
+
+    :returns: the number of loops placed under each name, (captured, residue).
+    :rtype: tuple[int, int]
+
+    :raises RuntimeError: if one candidate is nested inside another or a
+        candidate is already inside a PSyData region.
+    :raises TransformationError: if a caliper would land inside an OpenMP
+        region, which means this was called after openmp_parallelise_loops.
+
+    '''
+    profile_trans = ProfileTrans()
+    counts = {CAPTURED_REGION: 0, RESIDUE_REGION: 0}
+    for schedule in psyir.walk(InvokeSchedule):
+        module = _module_name(schedule)
+        invoke = schedule.name.lower()
+        candidates = _cell_kernel_loops(schedule)
+        _refuse_nesting(candidates, schedule)
+        for loop in candidates:
+            _refuse_inside_openmp(loop)
+            _refuse_wrapped(loop, schedule)
+        placements = []
+        for loop in candidates:
+            kernel = loop.coded_kernels()[0].name.lower()
+            if (module, invoke, kernel) in manifest:
+                placements.append((loop, CAPTURED_REGION, CAPTURED_REGION))
+            elif residue_per_kernel:
+                placements.append((loop, f"{RESIDUE_REGION}:{kernel}", RESIDUE_REGION))
+            else:
+                placements.append((loop, RESIDUE_REGION, RESIDUE_REGION))
+        # Applied in a second pass so that no caliper is placed at all if any
+        # candidate in the schedule is refused.
+        for loop, region, kind in placements:
+            profile_trans.apply(
+                loop, options={'region_name': (REGION_MODULE, region)})
+            counts[kind] += 1
+    return counts[CAPTURED_REGION], counts[RESIDUE_REGION]
+
+
 def census_report(psyir):
     '''
     Prints what the census placed and what it left to timed_region.
