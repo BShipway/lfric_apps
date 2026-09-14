@@ -16,12 +16,22 @@ below and no local scripts at all.
 
 WHAT IS CAPTURED
 
-Every coded-kernel cell loop whose LFRicKokkosTrans.validate passes, in every
-invoke of the algorithm PSyclone is processing. A loop validate refuses is left
-as Fortran and is not recorded here: the coverage survey in psy-ir-aidev
-records why, per loop, and this module does not duplicate that census. What
-is recorded is the other three outcomes -- captured, skipped on purpose, and
-the one that should not happen: validate passed and apply then failed.
+Every loop whose LFRicKokkosTrans.validate passes, in every invoke of the
+algorithm PSyclone is processing: the coded-kernel cell loops, the coded dof
+kernels, and -- since phase 7 -- the LFRic built-ins, which the transformation
+captures as the dof kernels they are (psyclone's LFRicKokkosBuiltinMixin
+writes the kernel schedule LFRic never did; reductions are refused by name
+and stay in Fortran). A loop validate refuses is left as Fortran and is not
+recorded here: the coverage survey in psy-ir-aidev records why, per loop, and
+this module does not duplicate that census. What is recorded is the other
+three outcomes -- captured, skipped on purpose, and the one that should not
+happen: validate passed and apply then failed.
+
+A built-in's region is named for the built-in and the kinds of its arguments
+(builtin_inc_x_plus_y_r_def_kokkos), and its formals are positional, so the
+hundreds of call sites of one built-in at one precision share one region
+source exactly as the sites of one coded kernel do -- which is what the
+identical-text rule below requires of them.
 
 WHERE THE GENERATED C++ GOES, AND WHY NOT BESIDE THE PSY LAYER
 
@@ -720,9 +730,9 @@ def capture(psyir, timed=False, coloured=False):
         # A snapshot, because apply() replaces loops while this iterates.
         for loop in list(schedule.walk(LFRicLoop)):
             kernels = loop.kernels()
-            if not kernels or any(isinstance(kernel, LFRicBuiltIn)
-                                  for kernel in kernels):
+            if not kernels:
                 continue
+            builtin = isinstance(kernels[0], LFRicBuiltIn)
             site = (module, schedule.name.lower(), kernels[0].name.lower())
             if site in SKIP:
                 rows.append(('# skipped',) + site + (SKIP[site],))
@@ -735,7 +745,11 @@ def capture(psyir, timed=False, coloured=False):
             # It is asked of a copy, and the loop itself is coloured only
             # where the copy validated: a colouring is never left on a loop
             # this build then leaves as Fortran.
-            take_colour = coloured and _shares_a_write(kernels[0])
+            # A built-in is a dof loop: one iteration writes one dof, so it
+            # has no shared write for either arm to answer and is never
+            # coloured.
+            take_colour = (coloured and not builtin
+                           and _shares_a_write(kernels[0]))
             if take_colour:
                 refusal = _refuses_coloured(loop, schedule)
                 if refusal is None:
