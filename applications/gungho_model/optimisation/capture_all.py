@@ -196,6 +196,29 @@ COLOURED_LOOP_TYPE = LFRicKokkosTrans._COLOURED_LOOP_TYPE
 #: bin/build-gungho-model, which read and purge it.
 REGIONS_DIR = 'kokkos_regions'
 
+#: Callee locals sized by a bound the caller supplies, as
+#: callee -> {dummy -> bound}, handed to LFRicKokkosTrans as its
+#: 'bounded_locals' option. Each entry is an ASSERTION about the kernel, as a
+#: SKIP row is: PSyclone cannot prove the bound, and a bound too small is an
+#: out-of-bounds write the region would not catch. State the reason beside it.
+#:
+#: subgrid_quadratic_recon (subgrid_common_support_mod) declares eleven
+#: column-length locals sized by its dummy 'nlayers'. The vertical FFSL
+#: kernels (ffsl_flux_z_nirvana_code, ffsl_flux_z_ppm_code) compute
+#: 'array_length = t_idx - b_idx + 1' over a sub-column and pass it as that
+#: dummy, which InlineTrans refuses ("assigned to before the call"). Every
+#: such sub-column lies within the column, so the kernel's own 'nlayers'
+#: bounds it: b_idx >= 1 and t_idx <= nlayers - 1 in every branch of both
+#: kernels (read 2026-09-13). Phase 7, Task B6: these loops are 85% of the
+#: per-step residue.
+BOUNDED_LOCALS = {
+    'subgrid_quadratic_recon': {'nlayers': 'nlayers'},
+}
+
+#: The options every validate() and apply() here is given, so that the
+#: capture, the coloured dry run and the survey judge a loop the same way.
+CAPTURE_OPTIONS = {'bounded_locals': BOUNDED_LOCALS}
+
 #: Sites that are not captured, as (psy module, invoke, kernel) -> reason. All
 #: three names lower-case. Empty is the intended state; see the docstring.
 SKIP = {
@@ -485,7 +508,7 @@ def _refuses_coloured(loop, schedule):
     except TransformationError as err:
         return f'LFRicColourTrans: {err}'
     try:
-        LFRicKokkosTrans().validate(inner)
+        LFRicKokkosTrans().validate(inner, options=CAPTURE_OPTIONS)
     except TransformationError as err:
         return str(err)
     return None
@@ -613,12 +636,12 @@ def capture(psyir, timed=False, coloured=False):
                     print(f"Kokkos: uncoloured {'/'.join(site)}: {refusal}")
             if not take_colour:
                 try:
-                    transformation.validate(loop)
+                    transformation.validate(loop, options=CAPTURE_OPTIONS)
                 except TransformationError:
                     continue
             before = {id(call) for call in schedule.walk(Call)}
             try:
-                source = transformation.apply(loop)
+                source = transformation.apply(loop, options=CAPTURE_OPTIONS)
             except Exception as err:            # pylint: disable=broad-except
                 reason = f'{err.__class__.__name__}: {err}'
                 rows.append(('# unmodelled',) + site + (reason,))
