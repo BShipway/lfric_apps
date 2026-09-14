@@ -163,6 +163,39 @@ a loop validate accepts and apply then fails on, which is recorded as
 be reported; _check_no_colouring_left asserts at the end of the capture that
 every coloured loop still standing is one of those and raises if it is not.
 
+TEAM SIZES ON A DEVICE
+
+A region that spreads a loop launches one team per cell and asks the backend
+for the team's size with Kokkos::AUTO. On the CUDA backend AUTO returns 128
+members for these regions, and an LFRic column is 30 levels deep, so 30 lanes
+of the 128 do the spread work and 98 idle; the team-level statements between
+the spread loops are executed redundantly by all 128, which is four warps'
+worth of instruction issue for one warp's worth of work, and at 238 registers
+a thread only two such teams are resident on a streaming multiprocessor at
+once. DEVICE_TEAM_SIZES names the regions where that costs enough to be worth
+asserting a size instead, and phase 7's Task B7 measured it: the horizontal
+FFSL flux regions fall from 22.6 ms a launch to 12.1 ms at 32 members, which
+is 46% of the kernel time of the model's heaviest region and 12% of all the
+GPU kernel time in a C48_MG timestep.
+
+The table applies ONLY to an accelerator build, and that is not a convenience:
+Kokkos::AUTO is one member on the OpenMP backend, where a team is a thread,
+and a policy asking for more members than the thread pool holds is refused at
+launch ('Requested Team Size is too large'). A host build of this profile runs
+on one thread in every checksum gate the prototype has, so a team size
+asserted for all builds would abort every one of them. KOKKOS_ACCEL is the
+variable the application Makefile already uses to turn a host compile of the
+generated regions into a device one, and make puts a command-line variable in
+the environment of the recipes it runs, so the capture reads it here.
+
+This is a profile assertion standing in for something the backend should
+decide. The writer emits one literal for every backend, so a size right for a
+CUDA warp is wrong for an OpenMP thread pool and the profile has to name which
+build it means. A launch that asked its own policy at run time -- the size the
+backend recommends, clamped to the members the backend can give -- would need
+no table and no environment variable; that is recorded for the writer in
+psy-ir-aidev's Task B7 and is not done here.
+
 TIMED BUILDS
 
 capture(psyir, timed=True) places a caliper on each captured call whose site is
@@ -219,6 +252,38 @@ BOUNDED_LOCALS = {
 #: capture, the coloured dry run and the survey judge a loop the same way.
 CAPTURE_OPTIONS = {'bounded_locals': BOUNDED_LOCALS}
 
+#: The environment variable the application Makefile takes as "compile the
+#: generated regions for a card". Read rather than restated as a boolean of
+#: our own so that the table below cannot disagree with the compiler that
+#: built the region it sizes.
+ACCEL_VARIABLE = 'KOKKOS_ACCEL'
+
+#: Kernels whose hierarchical launch asks for a stated team size instead of
+#: Kokkos::AUTO, as kernel name -> members, ON AN ACCELERATOR BUILD ONLY. Each
+#: entry is an ASSERTION, as a SKIP row and a BOUNDED_LOCALS row are: the
+#: number is a measurement of one card and one mesh, not a property PSyclone
+#: derives, and a size larger than the backend can give is refused at launch.
+#: State the reason and the measurement beside it. The key is the kernel, not
+#: the call site, because every site of one kernel generates one region source
+#: and _write_region requires the sites to agree.
+#:
+#: ffsl_flux_xy_panel_remap_code and ffsl_flux_xy_sphere_code are the
+#: horizontal flux-form semi-Lagrangian transport, captured by Task B6b and
+#: the heaviest region on the card: 200 launches in ten C48_MG timesteps at
+#: 22.6 ms each under AUTO, a quarter of all GPU kernel time. AUTO gives them
+#: a 128-member team for a 30-level column. Measured on an H100 (94 GB,
+#: driver 580.173, nvcc 13.3) at C48_MG, ten steps, one rank, non-field
+#: staging, `production` profile, 2026-09-14: 32 members is 12.1 ms a launch,
+#: 16 is 12.3, 64 is 15.1, AUTO's 128 is 22.6. 32 is taken: it is the warp,
+#: it covers a 30-level column with two lanes to spare, and it is the size at
+#: which the whole run's GPU kernel time is lowest (15.8 s against AUTO's
+#: 18.1 s). Phase 7, Task B7, psy-ir-aidev
+#: validation/performance/phase-7-launch-shape-2026-09-14.tsv.
+DEVICE_TEAM_SIZES = {
+    'ffsl_flux_xy_panel_remap_code': 32,
+    'ffsl_flux_xy_sphere_code': 32,
+}
+
 #: Sites that are not captured, as (psy module, invoke, kernel) -> reason. All
 #: three names lower-case. Empty is the intended state; see the docstring.
 SKIP = {
@@ -256,7 +321,50 @@ def _check_skip():
                 "reason that is written down, or it is not skipped.")
 
 
+def _check_team_sizes():
+    '''
+    Refuses a DEVICE_TEAM_SIZES entry that is not a kernel and a team.
+
+    :raises ValueError: if any key is not a lower-case name, or any value is
+        not a positive integer.
+
+    '''
+    for kernel, members in DEVICE_TEAM_SIZES.items():
+        if not isinstance(kernel, str) or kernel != kernel.lower():
+            raise ValueError(
+                f"DEVICE_TEAM_SIZES key {kernel!r} must be a lower-case "
+                "kernel name, as a SKIP key's third part is.")
+        if (isinstance(members, bool) or not isinstance(members, int)
+                or members <= 0):
+            raise ValueError(
+                f"DEVICE_TEAM_SIZES[{kernel!r}] must be a positive number of "
+                f"team members, but found {members!r}.")
+
+
 _check_skip()
+_check_team_sizes()
+
+
+def options_for(kernel):
+    '''
+    The options this build gives LFRicKokkosTrans for one kernel.
+
+    CAPTURE_OPTIONS for every kernel, and the stated team size as well for a
+    kernel in DEVICE_TEAM_SIZES on an accelerator build. A host build is given
+    the options it was given before this table existed, so the source it
+    generates is unchanged: see the module docstring for why a team size a
+    host thread pool cannot supply is an abort rather than a slow launch.
+
+    :param str kernel: the lower-case name of the kernel implementation.
+
+    :returns: the options for validate() and apply().
+    :rtype: Dict[str, Any]
+
+    '''
+    members = DEVICE_TEAM_SIZES.get(kernel)
+    if members is None or not os.environ.get(ACCEL_VARIABLE):
+        return CAPTURE_OPTIONS
+    return {**CAPTURE_OPTIONS, 'team_size': members}
 
 
 def working_dir():
@@ -508,6 +616,9 @@ def _refuses_coloured(loop, schedule):
     except TransformationError as err:
         return f'LFRicColourTrans: {err}'
     try:
+        # CAPTURE_OPTIONS rather than options_for(): a team size is a launch
+        # shape and enters no rule validate applies, so asking the coloured
+        # dry run with one would be asking a different question of nothing.
         LFRicKokkosTrans().validate(inner, options=CAPTURE_OPTIONS)
     except TransformationError as err:
         return str(err)
@@ -618,6 +729,7 @@ def capture(psyir, timed=False, coloured=False):
                 print(f"Kokkos: skipped {'/'.join(site)}: {SKIP[site]}")
                 continue
             transformation = LFRicKokkosTrans()
+            options = options_for(site[2])
             # The coloured arm is asked first for a loop with a shared write,
             # because it is the arm that takes the updates no atomic answers.
             # It is asked of a copy, and the loop itself is coloured only
@@ -636,12 +748,12 @@ def capture(psyir, timed=False, coloured=False):
                     print(f"Kokkos: uncoloured {'/'.join(site)}: {refusal}")
             if not take_colour:
                 try:
-                    transformation.validate(loop, options=CAPTURE_OPTIONS)
+                    transformation.validate(loop, options=options)
                 except TransformationError:
                     continue
             before = {id(call) for call in schedule.walk(Call)}
             try:
-                source = transformation.apply(loop, options=CAPTURE_OPTIONS)
+                source = transformation.apply(loop, options=options)
             except Exception as err:            # pylint: disable=broad-except
                 reason = f'{err.__class__.__name__}: {err}'
                 rows.append(('# unmodelled',) + site + (reason,))
