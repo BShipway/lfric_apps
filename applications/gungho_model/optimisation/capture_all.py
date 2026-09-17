@@ -254,8 +254,22 @@ REGIONS_DIR = 'kokkos_regions'
 #: bounds it: b_idx >= 1 and t_idx <= nlayers - 1 in every branch of both
 #: kernels (read 2026-09-13). Phase 7, Task B6: these loops are 85% of the
 #: per-step residue.
+#:
+#: ffsl_flux_xy_special_edge_1d (ffsl_flux_xy_special_edge_kernel_mod) declares
+#: field_local(nlayers, recon_size) and field_local_tmp(1, recon_size) from its
+#: dummy 'recon_size'. The caller ffsl_flux_xy_special_edge_code assigns the
+#: actual in a branch -- 'recon_size = 3 + 2*order' when high_order_edges,
+#: '1 + 2*order' otherwise (read 2026-09-17) -- which InlineTrans refuses
+#: ("assigned to before the call"). '3 + 2*order' is the larger of the two
+#: branches for every order >= 0, and 'order' is a scalar formal of the region,
+#: so the launch can size the scratch from it before the functor runs; the
+#: inlined body still runs to the exact recon_size. The captured sibling
+#: ffsl_flux_xy_panel_remap declares the same array as
+#: field_local(nlayers, 1+2*order) directly, which is why it needs no entry.
+#: Phase 7, Task W11: this kernel is 38.7% of the special-edges host step.
 BOUNDED_LOCALS = {
     'subgrid_quadratic_recon': {'nlayers': 'nlayers'},
+    'ffsl_flux_xy_special_edge_1d': {'recon_size': '3 + 2 * order'},
 }
 
 #: The options every validate() and apply() here is given, so that the
