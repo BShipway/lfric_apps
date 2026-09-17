@@ -40,7 +40,7 @@ module helmholtz_operator_kernel_mod_test
     real(kind=r_solver), allocatable :: ptheta2v(:,:,:)
     real(kind=r_solver), allocatable :: m3_exner_star(:,:,:)
 
-    integer(kind=i_def), allocatable :: cell_map(:)
+    integer(kind=i_def) :: cell_next(6)
 
   contains
     procedure setUp
@@ -53,6 +53,8 @@ module helmholtz_operator_kernel_mod_test
     ! Mesh
     integer(kind=i_def), parameter :: nlayers = 5
     integer(kind=i_def), parameter :: nfaces = 4
+    integer(kind=i_def), parameter :: nfaces_re = 6
+    integer(kind=i_def), parameter :: cell = 1
     integer(kind=i_def), parameter :: max_length = 2
 
    ! Spaces
@@ -172,7 +174,6 @@ contains
     allocate(this%ptheta2v(ncell, ndf_wt, ndf_w2))
     allocate(this%m3_exner_star(ncell, ndf_w3, ndf_w3))
 
-    allocate(this%cell_map(stencil_size))
 
     ! Maps in neighbour cells
     ! Default all dofs to point to a dof in array bounds
@@ -190,9 +191,8 @@ contains
     ! North cell
     this%smap_w2(2,2,4) = this%smap_w2(4,1,1)
 
-    do df = 1, stencil_size
-      this%cell_map(df) = df
-    end do
+    ! Neighbour cell ids across faces W, S, E, N, below, above
+    this%cell_next = (/ 2, 3, 4, 5, 0, 0 /)
 
     ! Set up the fields
     this%hb_lumped_inv = 0.1_r_solver
@@ -209,8 +209,7 @@ contains
     this%p3theta = 1.0_r_solver
 
     ! Compute Helmholtz operator
-    call helmholtz_operator_code(stencil_size,         &
-                                 this%cell_map,        &
+    call helmholtz_operator_code(cell,                 &
                                  nlayers,              &
                                  this%helm_c,          &
                                  this%helm_n,          &
@@ -246,7 +245,9 @@ contains
                                  this%map_w2,          &
                                  ndf_wt,               &
                                  undf_wt,              &
-                                 this%map_wt)
+                                 this%map_wt,          &
+                                 nfaces_re,            &
+                                 this%cell_next)
 
     ! In terms of the kernel operators we have
     ! A = -u_normalisation*w2_mask*hb_lumped_inv*div_star = -1
@@ -304,7 +305,6 @@ contains
     allocate(this%ptheta2v(ncell, ndf_wt, ndf_w2))
     allocate(this%m3_exner_star(ncell, ndf_w3, ndf_w3))
 
-    allocate(this%cell_map(stencil_size))
 
     ! A cell on the Eastern edge
     ! Branches are ordered 1,2,3,4 corresponding to W,S,E,N
@@ -330,9 +330,8 @@ contains
     ! North cell
     this%smap_w2(2,2,4) = this%smap_w2(4,1,1)
 
-    do df = 1, stencil_size
-      this%cell_map(df) = df
-    end do
+    ! Neighbour cell ids across faces W, S, E, N, below, above; no East cell
+    this%cell_next = (/ 2, 3, 0, 4, 0, 0 /)
 
     ! Set up the fields
     this%hb_lumped_inv = 0.1_r_solver
@@ -349,8 +348,7 @@ contains
     this%p3theta = 1.0_r_solver
 
     ! Compute Helmholtz operator
-    call helmholtz_operator_code(stencil_size,         &
-                                 this%cell_map,        &
+    call helmholtz_operator_code(cell,                 &
                                  nlayers,              &
                                  this%helm_c,          &
                                  this%helm_n,          &
@@ -386,7 +384,9 @@ contains
                                  this%map_w2,          &
                                  ndf_wt,               &
                                  undf_wt,              &
-                                 this%map_wt)
+                                 this%map_wt,          &
+                                 nfaces_re,            &
+                                 this%cell_next)
 
     ! As for a cell not on the edge of the domain
     !

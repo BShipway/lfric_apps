@@ -405,8 +405,8 @@ contains
                                                     lagged_orog,     &
                                                     dry_static_adjust
     use sci_sort_ref_kernel_mod,              only: sort_ref_kernel_type
-    use psykal_lite_mod,                      only: invoke_helmholtz_operator_kernel_type, &
-                                                    invoke_elim_helmholtz_operator_kernel_type
+    use psykal_lite_mod,                      only: invoke_elim_helmholtz_operator_kernel_type
+    use helmholtz_operator_kernel_mod,        only: helmholtz_operator_kernel_type
     use boundaries_config_mod,                only: limited_area
     use sample_eliminated_theta_q32_kernel_mod, &
                                  only: sample_eliminated_theta_q32_kernel_type
@@ -730,17 +730,18 @@ contains
                                                        rsol_w2_mask)
 
          else
-           call invoke_helmholtz_operator_kernel_type( Helmholtz_operator(:,level), &
-                                                       Hb_lumped_inv(level),        &
-                                                       req_stencil_depth,           &
-                                                       u_normalisation,             &
-                                                       div_star(level),             &
-                                                       t_normalisation,             &
-                                                       ptheta2v(level),             &
-                                                       compound_div(level),         &
-                                                       m3_exner_star(level),        &
-                                                       p3theta(level),              &
-                                                       rsol_w2_mask)
+           call invoke( name = "compute_helmholtz_operator",                 &
+                        helmholtz_operator_kernel_type( Helmholtz_operator(:,level), &
+                                                        Hb_lumped_inv(level),        &
+                                                        req_stencil_depth,           &
+                                                        u_normalisation,             &
+                                                        div_star(level),             &
+                                                        t_normalisation,             &
+                                                        ptheta2v(level),             &
+                                                        compound_div(level),         &
+                                                        m3_exner_star(level),        &
+                                                        p3theta(level),              &
+                                                        rsol_w2_mask) )
          end if
        end if
 
