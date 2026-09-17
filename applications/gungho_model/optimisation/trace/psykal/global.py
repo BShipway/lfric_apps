@@ -27,9 +27,22 @@ Intersect the two and the candidates for capture are what is left:
 
 This is instrumentation, not an optimisation. It exists to be built, run once
 and read; nothing in the prototype depends on its output being reproducible
-from a build that has it applied. Built-in loops are deliberately not traced:
-they are neither capture candidates nor interesting here, and there are enough
-of them to bury the output.
+from a build that has it applied.
+
+Built-in loops are traced, but carry no inventory row. Until phase 7 they were
+skipped for both halves: no coded-kernel file meant no capture and nothing the
+inventory's structural facts (stencil, quadrature, codeblocks and the rest)
+could say anything about, and there were enough of them to bury the output. B9
+(2026-09-14/16) made every built-in capturable through
+LFRicKokkosBuiltinMixin's synthesised schedule, so `whole-model-regions-entered`
+(psy-ir-aidev's tests/test_kokkos_region_entered.sh, through
+bin/capture-manifest) now expects a trace entry for every captured
+`builtin_*_kokkos` region's call sites, tagged the same way as a coded kernel's
+-- "module invoke kernel", one built-in per loop, so the join is exact by
+construction. The inventory stays coded-kernel-only: a built-in is never
+refused for a structural reason -- the capture takes it by kind alone -- so
+there is nothing for a loop-inventory row to record about it, and the
+'enough of them to bury the output' worry was always about that half.
 
 '''
 import os
@@ -169,8 +182,8 @@ def trace_statement(schedule, tag):
 
 def trans(psyir):
     '''
-    Applies the minimum transformations, then inventories and traces every
-    coded-kernel loop.
+    Applies the minimum transformations, then traces every loop and
+    inventories the coded-kernel ones.
 
     :param psyir: the PSyIR of the PSy layer.
     :type psyir: :py:class:`psyclone.psyir.nodes.FileContainer`
@@ -185,12 +198,20 @@ def trans(psyir):
         module = container.name if container else psyir.name
         for loop in schedule.walk(LFRicLoop):
             kernels = loop.kernels()
-            if not kernels or any(isinstance(kernel, LFRicBuiltIn)
-                                  for kernel in kernels):
+            if not kernels:
                 continue
             names = '+'.join(kernel.name.lower() for kernel in kernels)
-            rows.append(loop_row(module, schedule, loop))
             tag = f'{module} {schedule.name} {names}'
+            # A built-in loop is traced like any other -- same tag shape,
+            # 'module invoke kernel' -- because capture_all.py's manifest
+            # site for it is built the same way (kernels[0].name.lower(), a
+            # built-in loop always having exactly one kernel), so the two
+            # agree by construction rather than by a second naming rule kept
+            # in step with the first. Only the inventory row is coded-kernel
+            # business: a built-in has no kernel file for loop_row's
+            # structural facts to describe.
+            if not any(isinstance(kernel, LFRicBuiltIn) for kernel in kernels):
+                rows.append(loop_row(module, schedule, loop))
             loop.parent.children.insert(
                 loop.position, trace_statement(schedule, tag))
 
