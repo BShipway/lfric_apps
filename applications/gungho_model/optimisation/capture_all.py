@@ -198,6 +198,37 @@ variable the application Makefile already uses to turn a host compile of the
 generated regions into a device one, and make puts a command-line variable in
 the environment of the recipes it runs, so the capture reads it here.
 
+COLOURING A NAMED KERNEL ON A CARD
+
+DEVICE_COLOURED is the same idea applied to the coloured arm: the loops of a
+kernel it names are coloured before capture, on an accelerator build only.
+It exists because the paragraphs above leave a gap. The default build must
+keep its bit-exact host checksums, so it may not colour; but on a card the
+kernels the atomic arm refuses do not merely take a different answer, they
+take no answer at all and stay in Fortran on the host, where at C48 after
+task W4a the two of them were 14.8% of the whole host segment of a timestep.
+An accelerator build's checksums are judged against the measured device band
+rather than against the Fortran to the bit (psy-ir-aidev docs/records/
+2026-09-18-device-band-rooflines-twelve-day/), so the floating-point
+difference colouring makes is a difference that build already admits, and the
+host build -- which is where the bit-exactness gate runs -- reads the table
+and takes nothing from it.
+
+Naming kernels rather than colouring every shared write on a card is
+deliberate. A coloured launch is entered once per colour instead of once, so
+colouring trades launches for Fortran; that trade pays where the Fortran is
+heavy and loses where it is not, and which is which is a measurement. Each
+entry therefore carries the host share it was put in for, the way a
+DEVICE_TEAM_SIZES entry carries the milliseconds it was measured at.
+
+The mechanism is the coloured build's, unchanged: capture() asks
+LFRicKokkosTrans whether the kernel has a shared write, rehearses the
+colouring on a copy of the invoke schedule, and colours the real loop only
+where that answered yes. So a kernel named in DEVICE_COLOURED that the
+transformation would not colour is captured, or left as Fortran, exactly as
+it would have been without the entry, and _check_no_colouring_left asserts
+the no-coloured-Fortran invariant here as it does there.
+
 This is a profile assertion standing in for something the backend should
 decide. The writer emits one literal for every backend, so a size right for a
 CUDA warp is wrong for an OpenMP thread pool and the profile has to name which
@@ -308,6 +339,68 @@ DEVICE_TEAM_SIZES = {
     'ffsl_flux_xy_sphere_code': 32,
 }
 
+#: Kernels whose loops are coloured before capture, as kernel name -> reason,
+#: ON AN ACCELERATOR BUILD ONLY. Each entry is an ASSERTION, as a SKIP row and
+#: a DEVICE_TEAM_SIZES row are: it says that this kernel's shared write is one
+#: no atomic answers, that LFRicColourTrans will colour its loops, and that
+#: the launches a colour costs are worth less than the Fortran the colouring
+#: replaces. State the reason and the measurement beside it.
+#:
+#: WHY AN ACCELERATOR BUILD ONLY. Colouring changes the order the
+#: contributions to a shared dof are summed, which is a floating-point
+#: difference. The host 'kokkos-all' build is the control every other profile
+#: is measured against and its checksums are bit-identical to the Fortran
+#: reference, so a colouring that reached it would move the control (the
+#: 'kokkos-all-coloured' tree's global.py says the same thing at length).
+#: KOKKOS_ACCEL is the variable the application Makefile sets when the
+#: generated regions are compiled for a card, so a host build reads this table
+#: and takes nothing from it, exactly as it does DEVICE_TEAM_SIZES. On the
+#: card the answer is judged against the measured device band, not against the
+#: Fortran to the bit; see psy-ir-aidev docs/records/
+#: 2026-09-18-device-band-rooflines-twelve-day/outcome.md.
+#:
+#: The two entries are the two shared-write kernels of the C48 host profile
+#: after Task W4a (psy-ir-aidev validation/performance/
+#: phase-7-lite-invokes-2026-09-17/host-profile-C48-n1-h5-r1.txt): together
+#: 14.8% of the host segment, the heaviest uncaptured pair the atomic arm
+#: refuses with "Colour the loop instead". Phase 7, Task G2.
+DEVICE_COLOURED = {
+    'pressure_gradient_p0_code':
+        '11.5% of the C48 host segment. The kernel accumulates into rhs, a '
+        'W2 field, with rhs(x) = rhs(x) + A + B: two terms, so the statement '
+        'is not the one-operand read-modify-write a single atomic carries '
+        'out and the atomic arm refuses it. Colouring makes the shape of the '
+        'update a non-question (four colours, four launches a call site)',
+    'w3_to_w2_average_kernel_code':
+        '3.3% of the C48 host segment. The kernel accumulates into the four '
+        'horizontal dofs of a W2 field and then STORES to its vertical ones '
+        '(field_w2(map_w2(B)+k) = ...), and a store into a field the same '
+        'launch is accumulating into is a race no atomic orders. Colouring '
+        'separates the cells that meet at a dof, so neither statement needs '
+        'an atomic',
+}
+
+
+def _check_coloured():
+    '''
+    Refuses a DEVICE_COLOURED entry that is not a kernel with a reason.
+
+    :raises ValueError: if any key is not a lower-case kernel name, or any
+        value is not a non-empty reason.
+
+    '''
+    for kernel, reason in DEVICE_COLOURED.items():
+        if not isinstance(kernel, str) or kernel != kernel.lower():
+            raise ValueError(
+                f"DEVICE_COLOURED key {kernel!r} must be a lower-case kernel "
+                "name, as a SKIP key's third part is.")
+        if not isinstance(reason, str) or not reason.strip():
+            raise ValueError(
+                f"DEVICE_COLOURED entry {kernel!r} has no reason. A loop is "
+                "coloured for a reason that is written down, or it is not "
+                "coloured.")
+
+
 #: Sites that are not captured, as (psy module, invoke, kernel) -> reason. All
 #: three names lower-case. Empty is the intended state; see the docstring.
 SKIP = {
@@ -367,6 +460,7 @@ def _check_team_sizes():
 
 _check_skip()
 _check_team_sizes()
+_check_coloured()
 
 
 def options_for(kernel):
@@ -389,6 +483,29 @@ def options_for(kernel):
     if members is None or not os.environ.get(ACCEL_VARIABLE):
         return CAPTURE_OPTIONS
     return {**CAPTURE_OPTIONS, 'team_size': members}
+
+
+def colours_on_a_card(kernel):
+    '''
+    Whether this build colours the loops of one kernel before capturing them.
+
+    DEVICE_COLOURED names them, and only an accelerator build takes the table:
+    see it for why the host control must not be coloured. The answer is a
+    request, not a decision -- capture() still asks LFRicKokkosTrans whether
+    the kernel has a shared write for a colouring to answer, and still
+    rehearses the colouring on a copy before it colours the loop -- so a
+    kernel named here whose loop the transformation will not colour is
+    captured by the atomic arm exactly as it would have been, or left as
+    Fortran exactly as it would have been.
+
+    :param str kernel: the lower-case name of the kernel implementation.
+
+    :returns: whether the loops of that kernel are to be coloured.
+    :rtype: bool
+
+    '''
+    return (kernel in DEVICE_COLOURED
+            and bool(os.environ.get(ACCEL_VARIABLE)))
 
 
 def working_dir():
@@ -762,8 +879,8 @@ def capture(psyir, timed=False, coloured=False):
             # A built-in is a dof loop: one iteration writes one dof, so it
             # has no shared write for either arm to answer and is never
             # coloured.
-            take_colour = (coloured and not builtin
-                           and _shares_a_write(kernels[0]))
+            take_colour = ((coloured or colours_on_a_card(site[2]))
+                           and not builtin and _shares_a_write(kernels[0]))
             if take_colour:
                 refusal = _refuses_coloured(loop, schedule)
                 if refusal is None:
@@ -794,7 +911,11 @@ def capture(psyir, timed=False, coloured=False):
             captured_sites.add(site)
             print(f"Kokkos: captured {symbol} at {'/'.join(site)} ({status})")
 
-    if coloured:
+    if coloured or coloured_sites:
+        # Asked whenever a colouring was made, not only in the coloured tree:
+        # DEVICE_COLOURED colours a named kernel's loops in the default tree
+        # too, and the invariant -- no loop left as Fortran was coloured -- is
+        # the same invariant there.
         _check_no_colouring_left(psyir, coloured_sites, captured_sites,
                                  unmodelled_sites)
 
