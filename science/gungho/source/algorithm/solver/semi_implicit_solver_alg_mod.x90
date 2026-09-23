@@ -408,7 +408,8 @@ contains
                                    mixed_solver_a_tol,      &
                                    si_maximum_iterations,   &
                                    si_monitor_convergence,  &
-                                   si_fail_on_non_converged ) )
+                                   si_fail_on_non_converged, &
+                                   weight_fields=.true._l_def ) )
     case(SI_METHOD_PREC_ONLY)
       allocate( mixed_solver_out,                                         &
                 source = precondition_only_type( mixed_operator_out,      &
