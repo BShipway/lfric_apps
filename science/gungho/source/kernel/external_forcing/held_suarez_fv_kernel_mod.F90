@@ -9,6 +9,9 @@
 !> In this first version, only the increments to theta are calculated in this way,
 !> for winds we will still use the weak form
 !>
+!> The optional random perturbation of the increment is applied by
+!> held_suarez_perturbation_kernel_mod, invoked after this kernel.
+!>
 !> Kernel adds a Held-Suarez forcing based on Wedi and Smolarkiewicz 2009:
 !> Wedi, N. P. and Smolarkiewicz, P. K. (2009), A framework for testing global
 !> non-hydrostatic models. Q.J.R. Meteorol. Soc., 135: 469-484.
@@ -29,7 +32,6 @@ module held_suarez_fv_kernel_mod
   use calc_exner_pointwise_mod,    only: calc_exner_pointwise
   use held_suarez_forcings_mod,    only: held_suarez_newton_frequency, &
                                          held_suarez_equilibrium_theta
-  use external_forcing_config_mod, only: hs_random
 
   ! Configuration modules
   use base_mesh_config_mod,      only: geometry, topology
@@ -132,7 +134,6 @@ subroutine held_suarez_fv_code(nlayers,                     &
 
   real(kind=r_def) :: coords(3)
   real(kind=r_def), dimension(ndf_chi)  :: chi_1_at_dof, chi_2_at_dof, chi_3_at_dof
-  real(kind=r_def) :: pert(nlayers+1)
 
   coords(:) = 0.0_r_def
 
@@ -167,14 +168,6 @@ subroutine held_suarez_fv_code(nlayers,                     &
        * (theta(map_wth(1) + k) - theta_eq)*dt
 
   end do
-
-  if (hs_random)then
-    call random_number(pert)
-
-    dtheta(map_wth(1):map_wth(1)+nlayers) = dtheta(map_wth(1):map_wth(1)+nlayers) &
-       *(1.0_r_def + (pert-0.5_r_def)*.0001_r_def)
-
-  end if
 
 end subroutine held_suarez_fv_code
 

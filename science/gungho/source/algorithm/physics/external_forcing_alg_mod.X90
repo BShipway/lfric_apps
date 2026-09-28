@@ -31,13 +31,16 @@ module external_forcing_alg_mod
                                              filtering_order,                    &
                                              diffusion_order,                    &
                                              diffusion_coefficient,              &
-                                             pc2_force_response
+                                             pc2_force_response,                 &
+                                             hs_random
   use log_mod,                         only: log_event, log_scratch_space,       &
                                              LOG_LEVEL_INFO, LOG_LEVEL_ERROR
   use lfric_xios_write_mod,            only: write_field_generic
   use field_parent_mod,                only: write_interface
 
   use held_suarez_fv_kernel_mod,       only: held_suarez_fv_kernel_type
+  use held_suarez_perturbation_kernel_mod, &
+                                       only: held_suarez_perturbation_kernel_type
   use held_suarez_fv_wind_kernel_mod,  only: held_suarez_fv_wind_kernel_type
   use earth_like_kernel_mod,           only: earth_like_kernel_type
   use tidally_locked_earth_kernel_mod, only: tidally_locked_earth_kernel_type
@@ -193,6 +196,10 @@ contains
           call invoke(held_suarez_fv_kernel_type(dtheta_forcing, theta, &
                                                  exner_in_wth, chi,     &
                                                  panel_id, kappa, dt) )
+
+          if (hs_random) then
+            call invoke(held_suarez_perturbation_kernel_type(dtheta_forcing))
+          end if
 
         case(theta_forcing_earth_like)
 

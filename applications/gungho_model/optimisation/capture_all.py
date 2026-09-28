@@ -364,6 +364,10 @@ DEVICE_TEAM_SIZES = {
 #: phase-7-lite-invokes-2026-09-17/host-profile-C48-n1-h5-r1.txt): together
 #: 14.8% of the host segment, the heaviest uncaptured pair the atomic arm
 #: refuses with "Colour the loop instead". Phase 7, Task G2.
+#:
+#: The last two are the shared-write kernels of the Held-Suarez physics
+#: coupling, measured in the C48 L85 host profile of psy-ir-aidev
+#: validation/gc-faster/rung-1/capture-probe.md. Phase 8, Task R3 (B7).
 DEVICE_COLOURED = {
     'pressure_gradient_p0_code':
         '11.5% of the C48 host segment. The kernel accumulates into rhs, a '
@@ -378,6 +382,16 @@ DEVICE_COLOURED = {
         'launch is accumulating into is a race no atomic orders. Colouring '
         'separates the cells that meet at a dof, so neither statement needs '
         'an atomic',
+    'held_suarez_fv_wind_code':
+        'Part of the 6.2% of the C48 L85 Held-Suarez step external_forcing '
+        'takes. The kernel accumulates into the four horizontal dofs of du, '
+        'a W2 field, and STORES zero to its two vertical ones, the store '
+        'into a field the launch accumulates into that no atomic orders',
+    'nodal_xyz_coordinates_code':
+        '28% of the C48 L85 Held-Suarez step, twice a step from the physics '
+        'wind mappings. The kernel writes the nodal coordinates of a W2 '
+        'field, whose dofs the cells that meet at a face share, with plain '
+        'stores the atomic arm refuses',
 }
 
 
